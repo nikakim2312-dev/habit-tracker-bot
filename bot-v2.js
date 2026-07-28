@@ -1,3 +1,5 @@
+
+
 // Трекер привычек — облегчённая версия для Replit
 // Хранит данные в JSON файле (без SQLite)
 // Все пуши — простой текст, без Markdown
@@ -18,7 +20,7 @@ const DATA_FILE = 'data.json';
 // 1) если задана MINIAPP_URL — используем её
 // 2) если задана WEBAPP_URL и она НЕ указывает на наш же хост — используем
 // 3) иначе — дефолт
-const DEFAULT_MINIAPP = 'https://yu4t6lt702emy.space.minimax.io';
+const DEFAULT_MINIAPP = 'https://hqle67kztydxq.space.minimax.io';
 const SELF_HOST = process.env.RENDER_EXTERNAL_URL || process.env.KOYEB_PUBLIC_URL || `http://localhost:${PORT}`;
 function getMiniAppUrl() {
   if (process.env.MINIAPP_URL) return process.env.MINIAPP_URL;
@@ -949,43 +951,9 @@ async function showSettingsInline(ctx) {
 }
 
 function buildWebAppUrl(tgId) {
-  // Упаковываем ВСЕ данные в URL (надёжнее чем API)
-  const u = db.users[tgId];
-  if (!u) return `${WEBAPP_URL}?tg_id=${tgId}`;
-  const habits = getHabits(tgId);
-  const today = todayKey();
-  const habitsWithStats = habits.map(h => {
-    const doneDays = [];
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      if (isChecked(h.id, key)) doneDays.push(key);
-    }
-    let streak = 0;
-    for (let i = 0; i < 365; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      if (isChecked(h.id, key)) streak++; else break;
-    }
-    return { id: h.id, name: h.name, emoji: h.emoji, color: h.color, streak: h.streak, best: h.best, doneDays, totalChecks: doneDays.length, percent30: Math.round(doneDays.length/30*100) };
-  });
-  const data = {
-    user: { tg_id: tgId, name: u.name, best_streak: u.best_streak, total_checks: u.total_checks, palette: u.palette || 'forest', reminder_time: u.reminder_time || '08:00' },
-    habits: habitsWithStats,
-    challenges: Object.values(db.challenges || {}).filter(c => c.owner_id === tgId),
-    achievements: Object.values(db.achievements || {}).filter(a => a.tg_id === tgId),
-    challengeCatalog: CHALLENGES.map(c => ({
-      id: c.id, title: c.title, emoji: c.emoji, shortDesc: c.shortDesc,
-      description: c.desc.slice(0, 100) + (c.desc.length > 100 ? '…' : ''),
-      days: c.days, color: c.color, habitFreq: c.habitFreq,
-      habitName: c.habitName, habitEmoji: c.habitEmoji,
-      habits: c.habits ? c.habits.map(h => ({ name: h.name, emoji: h.emoji })) : null,
-      selectable: c.selectable,
-    })),
-  };
-  return `${WEBAPP_URL}?tg_id=${tgId}&data=${encodeURIComponent(JSON.stringify(data))}`;
+  // Короткий URL — Telegram имеет лимит ~512 символов на web_app.url
+  // Данные WebApp подгрузит через API
+  return `${WEBAPP_URL}?tg_id=${tgId}`;
 }
 
 bot.on('callback_query:data', async (ctx) => {

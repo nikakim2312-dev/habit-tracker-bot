@@ -1069,7 +1069,8 @@
     }
 
     c.innerHTML = html;
-    document.getElementById('addHabitBtn').onclick = openAddModal;
+    const addBtn = document.getElementById('addHabitBtn');
+    if (addBtn) addBtn.onclick = openAddModal;
     const showAll = document.getElementById('showAll');
     if (showAll) showAll.onclick = renderAllHabits;
     document.querySelectorAll('.habit-mini').forEach(el => {
@@ -1082,8 +1083,17 @@
         h.streak = !wasDone ? (h.streak || 0) + 1 : Math.max(0, (h.streak || 0) - 1);
         h.totalChecks = (h.totalChecks || 0) + (!wasDone ? 1 : -1);
         renderHome();
-        // Используем 'check' (action который знает бот) с date
-        sendAction('check', { habit_id: h.id, date: localToday() });
+        // Отправляем на сервер асинхронно — refresh не перезапишет наши локальные изменения
+        // потому что sendAction ждёт ответа и сбрасывает ETag/хеш
+        const result = await sendAction('check', { habit_id: h.id, date: localToday() });
+        if (!result?.ok) {
+          // Откат при ошибке
+          setHabitDoneToday(h, wasDone);
+          h.streak = wasDone ? (h.streak || 0) + 1 : Math.max(0, (h.streak || 0) - 1);
+          h.totalChecks = (h.totalChecks || 0) + (wasDone ? 1 : -1);
+          renderHome();
+          toast('ошибка синхронизации');
+        }
       };
     });
     const mini = document.getElementById('openFullApp');
@@ -1193,10 +1203,13 @@
     // Обновляем user.total_checks
     if (state.user) {
       state.user.total_checks = state.habits.reduce((s, h) => s + (h.totalChecks || 0), 0);
+      // ВАЖНО: best_streak = максимум из h.best (исторический), НЕ h.streak (текущий)
+      // Иначе при uncheck лучшая серия будет уменьшаться
       let best = 0;
       for (const h of state.habits) {
-        if ((h.streak || 0) > best) best = h.streak;
+        if ((h.best || 0) > best) best = h.best;
       }
+      // best_streak = max(текущий user.best_streak, максимум h.best)
       if ((state.user.best_streak || 0) < best) state.user.best_streak = best;
     }
   }
@@ -1315,7 +1328,8 @@
   function renderAchievement() {
     const c = document.getElementById('content');
     const ach = state.achievements || [];
-    const unlocked = new Set(ach.map(a => a.code));
+    // Защита от null/undefined элементов
+    const unlocked = new Set(ach.filter(a => a && a.code).map(a => a.code));
     const all = [
       { code: 'first_check',  icon: '✦', name: 'Первый шаг' },
       { code: 'streak_3',     icon: '◇', name: '3 дня' },
@@ -1868,7 +1882,10 @@
       if (dy > 80 && window.scrollY === 0) {
         pulling = false;
         toast('обновляю...');
-        refreshData();
+        // Сбрасываем ETag чтобы получить свежие данные
+        lastETag = null;
+        lastDataHash = null;
+        refreshDataSmart();
       }
     }, { passive: true });
     document.addEventListener('touchend', () => { pulling = false; }, { passive: true });

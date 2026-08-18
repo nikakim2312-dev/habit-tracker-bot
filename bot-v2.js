@@ -1126,27 +1126,39 @@ bot.on('message:text', async (ctx) => {
   if (text.startsWith('{') && text.includes('"action"')) {
     try {
       const event = JSON.parse(text);
-      const action = event.action;
+      if (!event || typeof event !== 'object') return;
+      const action = String(event.action || '');
+      if (!action) return;
       logger.info(`WebApp event from ${tgId}: ${action}`);
       // Данные УЖЕ сохранены через /api/action (в этой же транзакции)
       // sendData — это просто "уведомление" для бота
       // Отвечаем только для важных действий
       switch (action) {
         case 'add_habit': {
-          return safeReply(ctx, `✅ Привычка «${event.name || 'новая'}» добавлена!`);
+          return safeReply(ctx, `✅ Привычка «${String(event.name || 'новая').slice(0, 60)}» добавлена!`);
         }
         case 'delete_habit': {
           return safeReply(ctx, `🗑 Привычка удалена`);
         }
         case 'set_name': {
-          u.name = event.name || 'друг';
-          saveDB();
+          // ВАЖНО: sendData придёт ПОСЛЕ /api/action, но на всякий случай обновим
+          // (хотя данные уже могли быть обновлены через /api/action)
+          const newName = String(event.name || '').slice(0, 40) || 'друг';
+          if (u.name !== newName) {
+            u.name = newName;
+            saveDB();
+          }
           return safeReply(ctx, `👤 Имя: ${u.name}`);
         }
         case 'set_reminder': {
-          u.reminder_time = event.value || '09:00';
-          saveDB();
-          return safeReply(ctx, `⏰ Напоминание: ${u.reminder_time}`);
+          // Валидация формата HH:MM
+          const rem = String(event.value || '09:00');
+          if (/^(\d{1,2}):(\d{2})$/.test(rem)) {
+            u.reminder_time = rem;
+            saveDB();
+            return safeReply(ctx, `⏰ Напоминание: ${u.reminder_time}`);
+          }
+          return;
         }
         case 'check':
         case 'check_challenge':
@@ -1245,7 +1257,8 @@ async function showToday(ctx) {
   const today = todayKey();
   const rows = habits.map(h => {
     const done = isChecked(h.id, today);
-    return [{ text: `${done ? '✅' : '⬜'} ${h.emoji || '📌'} ${h.name} (🔥${h.streak})`, callback_data: `toggle:${h.id}` }];
+    const streak = h.streak || 0;
+    return [{ text: `${done ? '✅' : '⬜'} ${h.emoji || '📌'} ${h.name} (🔥${streak})`, callback_data: `toggle:${h.id}` }];
   });
   rows.push([{ text: '« Меню', callback_data: 'menu:main' }]);
   return safeReply(ctx, 'Отметь сегодня:', { reply_markup: { inline_keyboard: rows } });
@@ -1255,9 +1268,16 @@ async function showStats(ctx) {
   const tgId = ctx.from.id;
   const u = getUser(tgId);
   const habits = getHabits(tgId);
-  const total = habits.reduce((s, h) => s + (h.best || 0), 0);
-  return safeReply(ctx, 
-    `Статистика\n\nПривычек: ${habits.length}\nВсего отметок: ${u.total_checks}\nЛучшая серия за всё время: ${u.best_streak} дней`
+  // Лучшая серия — максимум из всех привычек (не сумма!)
+  const bestStreak = habits.length ? Math.max(0, ...habits.map(h => h.best || 0)) : 0;
+  const currentStreak = habits.length ? Math.max(0, ...habits.map(h => h.streak || 0)) : 0;
+  return safeReply(ctx,
+    `Статистика\n\n` +
+    `Привычек: ${habits.length}\n` +
+    `Всего отметок: ${u.total_checks || 0}\n` +
+    `Лучшая серия за всё время: ${u.best_streak || 0} дней\n` +
+    `Лучшая серия по привычкам: ${bestStreak} дней\n` +
+    `Текущая серия (макс): ${currentStreak} дней`
   );
 }
 
@@ -1285,9 +1305,12 @@ async function showSettingsInline(ctx) {
   const u = getUser(tgId);
   // Только время напоминания — палитра всегда зелёная
   const remRows = [];
-  const keys = Object.keys(REMINDER);
-  for (let i = 0; i < keys.length; i += 2) {
-    const a = REMINDER[keys[i]], b = REMINDER[keys[i+1]];
+  // Фиксированный порядок REMINDER (не Object.keys — нестабильно)
+  const REMINDER_ORDER_2 = ['А', 'Б', 'В', 'Г', 'Д'];
+  for (let i = 0; i < REMINDER_ORDER_2.length; i += 2) {
+    const aKey = REMINDER_ORDER_2[i], bKey = REMINDER_ORDER_2[i+1];
+    const a = REMINDER[aKey], b = bKey ? REMINDER[bKey] : null;
+    if (!a) continue;
     const row = [{ text: `${a.value === u.reminder_time ? '✓ ' : ''}${a.label}`, callback_data: `rem:${a.value}` }];
     if (b) row.push({ text: `${b.value === u.reminder_time ? '✓ ' : ''}${b.label}`, callback_data: `rem:${b.value}` });
     remRows.push(row);

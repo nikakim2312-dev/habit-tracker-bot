@@ -999,45 +999,48 @@ bot.command('silent', async (ctx) => {
 
 // ---------- Onboarding ----------
 bot.command('start', async (ctx) => {
-  logger.info(`CMD /start from ${ctx.from.id}`);
-  const u = getUser(ctx.from.id);
+  // Защита от анонимных update (когда ctx.from = undefined)
+  if (!ctx.from || !ctx.from.id) {
+    logger.warn('CMD /start without from');
+    return;
+  }
+  const tgId = ctx.from.id;
+  logger.info(`CMD /start from ${tgId}`);
+  const u = getUser(tgId);
   if (u.onboard_step >= 100) {
     logger.debug('Going to showMainMenu');
-    const tgId = ctx.from.id;
     const habits = getHabits(tgId);
     const today = todayKey();
     const doneToday = habits.filter(h => isChecked(h.id, today)).length;
     const url = buildWebAppUrl(tgId);
     logger.debug(`URL length: ${url.length}, habits: ${habits.length}`);
-    try {
-      const r = await safeReply(ctx, 
-        `Трекер привычек\n\nПривет, ${u.name}!\n\nСегодня: ${doneToday}/${habits.length}\nВсего отметок: ${u.total_checks}\nЛучшая серия: ${u.best_streak} дней`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '📱 Открыть трекер', web_app: { url: url } }],
-              [{ text: '✅ Отметить', callback_data: 'menu:today' }, { text: '📊 Статистика', callback_data: 'menu:stats' }],
-              [{ text: '🏆 Челенджи', callback_data: 'menu:challenge' }, { text: '⚙️ Настройки', callback_data: 'menu:settings' }],
-            ],
-          },
-        }
-      );
-      logger.debug('Sent OK');
-      return r;
-    } catch (e) {
-      logger.error('SEND FAILED', e);
-      throw e;
-    }
+    // ВАЖНО: имя может содержать что угодно — но Telegram в text-only mode
+    // принимает любые символы (нет parse_mode).
+    // НО если u.name содержит только цифры или спецсимволы — может выглядеть странно
+    // Защита: ограничиваем длину
+    const safeName = String(u.name || 'друг').slice(0, 40);
+    return safeReply(ctx,
+      `Трекер привычек\n\nПривет, ${safeName}!\n\nСегодня: ${doneToday}/${habits.length}\nВсего отметок: ${u.total_checks || 0}\nЛучшая серия: ${u.best_streak || 0} дней`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📱 Открыть трекер', web_app: { url: url } }],
+            [{ text: '✅ Отметить', callback_data: 'menu:today' }, { text: '📊 Статистика', callback_data: 'menu:stats' }],
+            [{ text: '🏆 Челенджи', callback_data: 'menu:challenge' }, { text: '⚙️ Настройки', callback_data: 'menu:settings' }],
+          ],
+        },
+      }
+    );
   }
   // === ОНБОРДИНГ v2 — простой и надёжный ===
   // Используем безопасные helpers (TTL 5 мин)
-  setObState(ctx.from.id, { step: 'pick_habits', picked: new Set() });
+  setObState(tgId, { step: 'pick_habits', picked: new Set() });
   u.onboard_step = 1;
   saveDB();
 
   // Создаём кнопки привычек
   return safeReply(ctx, ONBOARD[0].q, {
-    reply_markup: { inline_keyboard: buildOnboardKeyboard(ctx.from.id) }
+    reply_markup: { inline_keyboard: buildOnboardKeyboard(tgId) }
   });
 });
 
@@ -1088,23 +1091,27 @@ bot.command('test', async (ctx) => {
   const today = todayKey();
   const doneToday = habits.filter(h => isChecked(h.id, today)).length;
 
+  // ВАЖНО: при parse_mode HTML все значения должны быть escaped
+  // Иначе если u.name содержит < или > — Telegram выдаст ошибку
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const webhookStatus = process.env.WEBHOOK_URL ? 'активен' : 'не установлен';
+
   // Собираем диагностику
   const lines = [
     '🧪 <b>Тестовая диагностика</b>',
     '',
     `👤 User ID: <code>${tgId}</code>`,
-    `📛 Имя: ${u.name}`,
+    `📛 Имя: ${esc(u.name)}`,
     `📊 Шаг онбординга: ${u.onboard_step}`,
-    `🎨 Палитра: ${u.palette}`,
-    `⏰ Напоминание: ${u.reminder_time}`,
+    `🎨 Палитра: ${esc(u.palette)}`,
+    `⏰ Напоминание: ${esc(u.reminder_time)}`,
     '',
     `📋 Всего привычек: ${habits.length}`,
     `✅ Отмечено сегодня: ${doneToday}/${habits.length}`,
     `🔥 Лучшая серия: ${u.best_streak} дней`,
     `📈 Всего отметок: ${u.total_checks}`,
     '',
-    `🔧 Render: v51n`,
-    `🤖 Webhook: активен`,
+    `🤖 Webhook: ${webhookStatus}`,
     `⏱ Uptime бота: ${Math.floor(process.uptime())} сек`,
     `💾 Память: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`,
   ];
@@ -1214,7 +1221,7 @@ async function handleCommand(ctx, text) {
   const u = getUser(tgId);
   if (text === '/today') return showToday(ctx);
   if (text === '/stats') return showStats(ctx);
-  if (text === '/help') return safeReply(ctx, 
+  if (text === '/help') return safeReply(ctx,
     'Команды:\n\n' +
     '/start — главное меню\n' +
     '/today — отметить привычки\n' +
@@ -1223,7 +1230,9 @@ async function handleCommand(ctx, text) {
     '/stats — статистика\n' +
     '/challenge — челленджи\n' +
     '/silent 22:00 08:00 — тихий режим\n' +
-    '/silent off — выключить тишину\n\n' +
+    '/silent off — выключить тишину\n' +
+    '/test — диагностика бота\n' +
+    '/reset — сбросить онбординг\n\n' +
     'Или просто открой /start → кнопки'
   );
 }
@@ -1234,8 +1243,10 @@ async function showMainMenu(ctx) {
   const habits = getHabits(tgId);
   const today = todayKey();
   const doneToday = habits.filter(h => isChecked(h.id, today)).length;
-  return safeReply(ctx, 
-    `Трекер привычек\n\nПривет, ${u.name}!\n\nСегодня: ${doneToday}/${habits.length}\nВсего отметок: ${u.total_checks}\nЛучшая серия: ${u.best_streak} дней`,
+  // Защита имени (может содержать что угодно)
+  const safeName = String(u.name || 'друг').slice(0, 40);
+  return safeReply(ctx,
+    `Трекер привычек\n\nПривет, ${safeName}!\n\nСегодня: ${doneToday}/${habits.length}\nВсего отметок: ${u.total_checks || 0}\nЛучшая серия: ${u.best_streak || 0} дней`,
     {
       reply_markup: {
         inline_keyboard: [

@@ -1029,6 +1029,47 @@ bot.on('message:text', async (ctx) => {
 
   if (text.startsWith('/')) return handleCommand(ctx, text);
 
+  // === WebApp sendData() — JSON события из Mini App ===
+  // Когда WebApp открыт через кнопку бота, sendData() шлёт текст в чат
+  if (text.startsWith('{') && text.includes('"action"')) {
+    try {
+      const event = JSON.parse(text);
+      const action = event.action;
+      logger.info(`WebApp event from ${tgId}: ${action}`);
+      // Данные УЖЕ сохранены через /api/action (в этой же транзакции)
+      // sendData — это просто "уведомление" для бота
+      // Отвечаем только для важных действий
+      switch (action) {
+        case 'add_habit': {
+          return safeReply(ctx, `✅ Привычка «${event.name || 'новая'}» добавлена!`);
+        }
+        case 'delete_habit': {
+          return safeReply(ctx, `🗑 Привычка удалена`);
+        }
+        case 'set_name': {
+          u.name = event.name || 'друг';
+          saveDB();
+          return safeReply(ctx, `👤 Имя: ${u.name}`);
+        }
+        case 'set_reminder': {
+          u.reminder_time = event.value || '09:00';
+          saveDB();
+          return safeReply(ctx, `⏰ Напоминание: ${u.reminder_time}`);
+        }
+        case 'check':
+        case 'check_challenge':
+        case 'start_challenge':
+          // Тихо — WebApp уже обновил UI
+          return;
+        default:
+          // Неизвестное — игнорируем
+          return;
+      }
+    } catch (e) {
+      // Не JSON — обычное сообщение
+    }
+  }
+
   // === ОНБОРДИНГ v2 — упрощённый flow ===
   // Только ввод имени на финальном шаге (после выбора времени кнопкой)
   const st = getObState(tgId);

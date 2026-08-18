@@ -874,11 +874,19 @@
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  // === POST /api/action — реальная синхронизация с ботом ===
+  // === ГИБРИДНАЯ СИНХРОНИЗАЦИЯ ===
+  // 1) POST /api/action — мгновенная мутация (primary, всегда)
+  // 2) tg.sendData() — для важных событий: бот получит в чат
+  // Бот сам решает — слать ли подтверждение в чат (action !== 'check' тихо)
   const API_BASE = 'https://habit-tracker-bot-v51n.onrender.com';
+
+  // Действия которые НЕ шлют уведомление в чат (частые/тихие)
+  const QUIET_ACTIONS = new Set(['check', 'check_challenge']);
+
   async function sendAction(type, payload = {}) {
     if (!state.tg_id) return { ok: false, error: 'no tg_id' };
     try {
+      // 1. Мгновенная мутация через /api/action
       const r = await fetch(`${API_BASE}/api/action`, {
         method: 'POST',
         cache: 'no-store',
@@ -891,12 +899,27 @@
       lastDataHash = null;
       // Мгновенный refresh
       await refreshDataSmart();
+
+      // 2. Для ВАЖНЫХ действий — шлём событие в чат (через tg.sendData)
+      // Бот получит это как текстовое сообщение и сможет ответить
+      if (tg?.sendData && !QUIET_ACTIONS.has(type)) {
+        try {
+          tg.sendData(JSON.stringify({ action: type, ...payload, _result: data }));
+        } catch (e) {
+          // Если Mini App открыт НЕ из бота (например /diag) — sendData упадёт
+          console.debug('sendData skipped:', e.message);
+        }
+      }
       return data;
     } catch (e) {
       console.error('sendAction error:', e);
       return { ok: false, error: e.message };
     }
   }
+
+  // === Получение событий от бота через sendData ===
+  // tg.onEvent('webAppDataReceived', ...) — это не работает, бот не может
+  // отправлять данные в WebApp. Поэтому обратная связь — только refresh.
 
   // ===== Tree =====
   function getTreeSVG(streak) {

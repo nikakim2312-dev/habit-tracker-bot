@@ -1713,16 +1713,15 @@ setInterval(async () => {
       try {
         const u = db.users[tgId];
         if (!u || u.onboard_step < 100) continue;
-        if (isSilent(Number(tgId))) continue;
         // reminder_time может быть "08:00" или "off" — пропускаем off
         if (!u.reminder_time || u.reminder_time === 'off') continue;
-        // ВАЖНО: пушим в нужный час (с окном 0-1 минута) — старый код требовал точное совпадение
-        // Сейчас сравниваем только часы (любая минута в часе триггерит)
-        const reminderHour = u.reminder_time.split(':')[0];
-        if (reminderHour !== hh) continue;
+        // Пуш ТОЛЬКО в первую минуту часа (mm === '00'), не каждую минуту!
+        // Иначе пушится 60 раз в час
+        const [reminderH, reminderM] = u.reminder_time.split(':');
+        if (reminderH !== hh || reminderM !== mm) continue;
         const key = `remind:${nowStr}:${u.reminder_time}`;
         if (wasSent(tgId, key)) continue;
-        const habits = getHabits(Number(tgId));
+        const habits = getHabits(tgId);
         if (habits.length === 0) continue;
         // Пушим только если сегодня ещё НЕ все отмечены
         const day = todayKey();
@@ -1734,7 +1733,7 @@ setInterval(async () => {
         else if (u.reminder_time === '13:00') pool = PUSH.day;
         else if (u.reminder_time === '08:00') pool = PUSH.morning;
         else pool = PUSH.bold;
-        await sendPush(Number(tgId), pickPush(pool, u.name));
+        await sendPush(tgId, pickPush(pool, u.name));
         markSent(tgId, key);
       } catch (e) {
         logger.error(`Scheduler error for user ${tgId}`, e.message);
@@ -2134,13 +2133,14 @@ server.listen(PORT, '0.0.0.0', () => logger.info(`HTTP API on :${PORT}`));
 // ВАЖНО: НЕ завершать процесс на unhandledRejection (Node 15+ поведение по умолчанию)
 process.on('unhandledRejection', (reason, p) => {
   // Не падаем — просто логируем
-  logger.critical('UNHANDLED REJECTION (ignored, process continues)', String(reason?.message || reason));
+  const msg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+  logger.critical('UNHANDLED REJECTION (ignored, process continues)', msg);
 });
 process.on('uncaughtException', (err) => {
   logger.critical('UNCAUGHT EXCEPTION (ignored, process continues)', err);
 });
-await loadDB();
-logger.info('Трекер привычек bot started');
+
+// bot.catch() ДО loadDB — чтобы ловить все ошибки с самого начала
 bot.catch((err, ctx) => {
   logger.error('=== BOT ERROR ===');
   logger.error('MSG:', err.message);
@@ -2157,6 +2157,17 @@ bot.catch((err, ctx) => {
   }
   logger.error('STACK:', (err.stack || '').slice(0, 800));
 });
+
+// Load DB с защитой от зависания (10 сек таймаут)
+try {
+  await Promise.race([
+    loadDB(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('loadDB timeout 10s')), 10000))
+  ]);
+  logger.info('Трекер привычек bot started');
+} catch (e) {
+  logger.critical('loadDB failed, continuing with empty DB', e.message);
+}
 
 // Запуск: webhook если задан WEBHOOK_URL, иначе polling
 const WEBHOOK_URL = process.env.WEBHOOK_URL;

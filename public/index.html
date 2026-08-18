@@ -1107,15 +1107,17 @@
     state.habits.forEach(h => {
       const isDone = isHabitDoneToday(h);
       const emoji = h.emoji || '📌';
+      // ВАЖНО: h.id может содержать кавычки — escape обязателен
+      const safeId = escapeHtml(String(h.id || ''));
       html += `
-        <div class="habit-mini ${isDone ? 'done' : ''}" data-id="${h.id}">
+        <div class="habit-mini ${isDone ? 'done' : ''}" data-id="${safeId}">
           <div class="check">${isDone ? '✓' : ''}</div>
-          <div class="emoji" style="font-size:24px;line-height:1;margin-right:8px;flex-shrink:0">${emoji}</div>
+          <div class="emoji" style="font-size:24px;line-height:1;margin-right:8px;flex-shrink:0">${escapeHtml(emoji)}</div>
           <div class="info">
             <div class="name">${escapeHtml(h.name)}</div>
             <div class="meta">${h.percent30 || 0}% · ${h.streak || 0}д</div>
           </div>
-          <button class="del" data-del="${h.id}">×</button>
+          <button class="del" data-del="${safeId}">×</button>
         </div>
       `;
     });
@@ -1125,7 +1127,7 @@
       const delBtn = el.querySelector('.del');
       if (delBtn) {
         let confirmTimer = null;
-        delBtn.onclick = (e) => {
+        delBtn.onclick = async (e) => {
           e.stopPropagation();
           const habit = state.habits.find(x => x.id === el.dataset.id);
           if (!habit) return;
@@ -1148,10 +1150,21 @@
           }
           if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null; }
           const id = el.dataset.id;
-          state.habits = state.habits.filter(x => x.id !== id);
-          sendAction('delete_habit', { habit_id: id });
+          // Оптимистичное обновление — удаляем из state
+          const idx = state.habits.findIndex(x => x.id === id);
+          if (idx === -1) return;
+          const removedHabit = state.habits.splice(idx, 1)[0];
           renderAllHabits();
-          toast('удалено');
+          // Отправляем на сервер; при ошибке — откатываем
+          const result = await sendAction('delete_habit', { habit_id: id });
+          if (!result?.ok) {
+            // Восстанавливаем на нужной позиции
+            state.habits.splice(idx, 0, removedHabit);
+            renderAllHabits();
+            toast('ошибка удаления');
+          } else {
+            toast('удалено ✓');
+          }
         };
         return;
       }
@@ -1163,7 +1176,6 @@
         setHabitDoneToday(h, !wasDone);
         h.streak = !wasDone ? (h.streak || 0) + 1 : Math.max(0, (h.streak || 0) - 1);
         renderAllHabits();
-        // Используем 'check' (action который знает бот) с date
         sendAction('check', { habit_id: h.id, date: localToday() });
       };
     });
@@ -1398,26 +1410,29 @@
 
     if (myCh.length > 0) {
       html += '<div class="section-head"><h2>мои</h2></div>';
-      myCh.forEach(c => {
-        const pct = Math.min(100, Math.round((c.checkDays || 0) / c.days * 100));
-        const done = c.completed;
-        const restDays = c.days - (c.checkDays || 0);
+      myCh.forEach(ch => {
+        // Защита от деления на 0 и NaN
+        const checkDays = ch.checkDays || 0;
+        const days = ch.days || 1;
+        const pct = Math.min(100, Math.round(checkDays / days * 100));
+        const done = ch.completed;
+        const restDays = Math.max(0, days - checkDays);
         html += `
           <div class="ch-card">
             <div class="ch-head">
-              <div class="ch-icon">${c.emoji || '⌗'}</div>
+              <div class="ch-icon">${ch.emoji || '⌗'}</div>
               <div class="ch-info">
-                <div class="ch-name">${escapeHtml(c.title)}</div>
-                ${c.description ? `<div class="ch-desc">${escapeHtml(c.description)}</div>` : ''}
+                <div class="ch-name">${escapeHtml(ch.title)}</div>
+                ${ch.description ? `<div class="ch-desc">${escapeHtml(ch.description)}</div>` : ''}
               </div>
-              <div class="ch-badge ${done ? 'done' : ''}">${done ? 'готово' : c.days + 'д'}</div>
+              <div class="ch-badge ${done ? 'done' : ''}">${done ? 'готово' : days + 'д'}</div>
             </div>
             <div class="ch-bar"><div class="ch-bar-fill" style="width:${pct}%"></div></div>
             <div class="ch-meta">
-              <span>${c.checkDays || 0}/${c.days} ${done ? 'дней пройдено' : 'осталось ' + restDays}</span>
+              <span>${checkDays}/${days} ${done ? 'дней пройдено' : 'осталось ' + restDays}</span>
               <span>${pct}%</span>
             </div>
-            ${!done ? `<button class="ch-btn" data-cid="${c.id}">отметить сегодня</button>` : ''}
+            ${!done ? `<button class="ch-btn" data-cid="${escapeHtml(ch.id)}">отметить сегодня</button>` : ''}
           </div>
         `;
       });
@@ -1425,8 +1440,9 @@
 
     if (catalog.length > 0) {
       html += '<div class="section-head" style="margin-top:20px"><h2>доступные</h2></div>';
-      const myTitles = new Set(myCh.map(c => c.title));
-      const available = catalog.filter(c => !myTitles.has(c.title));
+      // Фильтруем — показываем только те, которых нет в активных челленджах
+      const myActiveTitles = new Set(myCh.filter(x => !x.completed).map(x => x.title));
+      const available = catalog.filter(cat => !myActiveTitles.has(cat.title));
       if (available.length === 0) {
         html += '<div class="empty"><span class="em">⌗</span><div class="txt">все челленджи уже начаты</div></div>';
       } else {
@@ -1493,17 +1509,27 @@
   // ===== Tabs =====
   async function switchTab(tab, btn) {
     document.querySelectorAll('.n-btn').forEach(b => b.classList.toggle('active', b === btn));
-    // Сначала подтягиваем свежие данные
-    await refreshData();
+    // Сначала подтягиваем свежие данные (смарт с ETag)
+    lastETag = null;
+    lastDataHash = null;
+    await refreshDataSmart();
     if (tab === 'home') renderHome();
     else if (tab === 'stats') renderStats();
     else if (tab === 'achievement') renderAchievement();
     else if (tab === 'challenge') renderChallenge();
     else if (tab === 'settings') openSettings();
   }
-  document.querySelectorAll('.n-btn').forEach(btn => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab, btn));
-  });
+  function initTabListeners() {
+    const btns = document.querySelectorAll('.n-btn');
+    if (!btns.length) {
+      setTimeout(initTabListeners, 100);
+      return;
+    }
+    btns.forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab, btn));
+    });
+  }
+  initTabListeners();
 
   // ===== Add modal =====
   let newEmoji = '💧';

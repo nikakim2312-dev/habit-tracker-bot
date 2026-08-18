@@ -1369,11 +1369,13 @@ bot.on('callback_query:data', async (ctx) => {
     setObState(tgId, { step: 'pick_reminder' });
     u.onboard_step = 2;
     saveDB();
-    // Показать кнопки времени напоминания
-    const remButtons = Object.entries(REMINDER).map(([k, v]) => [{
-      text: `${k} ${v.label}`,
-      callback_data: `ob_rem:${k}`
-    }]);
+    // Показать кнопки времени напоминания (фиксированный порядок)
+    const REMINDER_ORDER = ['А', 'Б', 'В', 'Г', 'Д'];
+    const remButtons = REMINDER_ORDER.map(k => {
+      const v = REMINDER[k];
+      if (!v) return null;
+      return [{ text: `${k} ${v.label}`, callback_data: `ob_rem:${k}` }];
+    }).filter(Boolean);
     await safeAnswerCb(ctx, 'Сохранено ✓');
     return safeReply(ctx, ONBOARD[1].q, { reply_markup: { inline_keyboard: remButtons } });
   }
@@ -1393,16 +1395,15 @@ bot.on('callback_query:data', async (ctx) => {
     const value = data.slice(4);
     const u = getUser(tgId);
     u.reminder_time = value;
-    save();
+    saveDB(); // Было save() — undefined function
     await safeAnswerCb(ctx, 'Напоминание сохранено');
     return showSettingsInline(ctx);
   }
   if (data.startsWith('pal:')) {
     u.palette = 'forest'; // Всегда зелёный
     saveDB();
-    try { await ctx.editMessageText('🌲 Зелёный лес (фиксировано)'); } catch (e) {}
-    try { await safeAnswerCb(ctx, '🌲 Зелёный лес'); } catch (e) {}
-    return;
+    try { await safeEditText(ctx, '🌲 Зелёный лес (фиксировано)'); } catch (e) {}
+    return safeAnswerCb(ctx, '🌲 Зелёный лес');
   }
   if (data.startsWith('toggle:')) {
     const habitId = data.slice(7);
@@ -1412,14 +1413,15 @@ bot.on('callback_query:data', async (ctx) => {
     const was = isChecked(habitId, day);
     setCheck(habitId, day, !was);
     if (!was) {
-      // Считаем streak
+      // Считаем streak (от сегодня назад, локальное время!)
       let streak = 0;
+      const nowD = new Date();
       for (let i = 0; i < 365; i++) {
-        const d = new Date();
+        const d = new Date(nowD);
         d.setDate(d.getDate() - i);
         const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         if (isChecked(habitId, key)) streak++;
-        else break;
+        else if (i > 0) break; // Сегодня может быть пустым — это ОК
       }
       h.streak = streak;
       h.best = Math.max(h.best, streak);
@@ -1432,15 +1434,6 @@ bot.on('callback_query:data', async (ctx) => {
       if (streak === 7) { await safeReply(ctx, 'Неделя силы. Не останавливайся.'); giveReward(tgId, 'Неделя силы — 7 дней'); }
       if (streak === 30) { await safeReply(ctx, 'Месяц. Ты машина.'); giveReward(tgId, 'Месяц дисциплины — 30 дней'); }
       if (streak === 100) { await safeReply(ctx, '100 дней. Сказочное дерево.'); giveReward(tgId, 'Сказочное дерево — 100 дней'); }
-      // Случайный бонус (10% шанс)
-      if (Math.random() < 0.1) {
-        const bonuses = [
-          '🍀 Удача! Сегодня +1 к streak бесплатно!',
-          '🌟 Бонус: +1 к лучшей серии!',
-          '🎁 Подарок: уровень повышен!',
-        ];
-        await safeReply(ctx, '🎁 ' + bonuses[Math.floor(Math.random() * bonuses.length)]);
-      }
     }
     saveDB();
     return showToday(ctx);
@@ -1452,14 +1445,16 @@ bot.on('callback_query:data', async (ctx) => {
 
     // Если челлендж со связкой привычек (selectable) — показать выбор
     if (cat.selectable && cat.habits) {
+      // ВАЖНО: не передаём cid в callback — он хранится в onboardState
+      // (Telegram ограничивает callback_data до 64 байт)
       onboardState.set(tgId, { step: 'pick_challenge_habits', challenge: cat, selected: new Set(), _ts: Date.now() });
       const rows = cat.habits.map((h, i) => [{
         text: `◯ ${h.emoji || '📌'} ${h.name}`,
-        callback_data: `cph:${i}`, // Только индекс — challenge хранится в onboardState
+        callback_data: `cph:${i}`,
       }]);
-      rows.push([{ text: '✅ Готово — добавить выбранные', callback_data: `cph_done:${cid.slice(0, 32)}` }]);
+      rows.push([{ text: '✅ Готово — добавить выбранные', callback_data: `cph_done` }]);
       rows.push([{ text: '« Отмена', callback_data: 'menu:challenge' }]);
-      return safeReply(ctx, 
+      return safeReply(ctx,
         `🚀 ${cat.emoji} ${cat.title}\n\n${cat.desc}\n\nВыбери привычки, которые хочешь добавить (можно несколько). Можно выбрать все или только те, что подходят:`,
         { reply_markup: { inline_keyboard: rows } }
       );
@@ -1500,30 +1495,32 @@ bot.on('callback_query:data', async (ctx) => {
     );
   }
 
-  // Toggle выбор привычки для связки
-  if (data.startsWith('cph:')) {
-    const [, cid, idxStr] = data.split(':');
+  // Toggle выбор привычки для связки (cid хранится в onboardState)
+  if (data === 'cph' || data.startsWith('cph:')) {
+    const idxStr = data === 'cph' ? '0' : data.split(':')[1];
     const idx = parseInt(idxStr);
     const st = onboardState.get(tgId);
-    if (!st || st.step !== 'pick_challenge_habits' || st.challenge.id !== cid) return safeAnswerCb(ctx, 'Отменено');
-    if (st.selected.has(idx)) st.selected.delete(idx);
-    else st.selected.add(idx);
+    if (!st || st.step !== 'pick_challenge_habits') return safeAnswerCb(ctx, 'Отменено');
+    if (idx >= 0 && idx < st.challenge.habits.length) {
+      if (st.selected.has(idx)) st.selected.delete(idx);
+      else st.selected.add(idx);
+    }
     const cat = st.challenge;
     const rows = cat.habits.map((h, i) => [{
       text: `${st.selected.has(i) ? '✓' : '◯'} ${h.emoji || '📌'} ${h.name}`,
-      callback_data: `cph:${cid}:${i}`,
+      callback_data: `cph:${i}`,
     }]);
-    rows.push([{ text: `✅ Готово (${st.selected.size}/${cat.habits.length})`, callback_data: `cph_done:${cid}` }]);
+    rows.push([{ text: `✅ Готово (${st.selected.size}/${cat.habits.length})`, callback_data: `cph_done` }]);
     rows.push([{ text: '« Отмена', callback_data: 'menu:challenge' }]);
     try { await ctx.editMessageReplyMarkup({ inline_keyboard: rows }); } catch {}
     return safeAnswerCb(ctx, '');
   }
 
   // Подтверждение выбора связки
-  if (data.startsWith('cph_done:')) {
-    const cid = data.slice('cph_done:'.length);
+  if (data === 'cph_done' || data.startsWith('cph_done:')) {
+    // cid берём из onboardState (не из callback — лимит 64 байт)
     const st = onboardState.get(tgId);
-    if (!st || st.step !== 'pick_challenge_habits' || st.challenge.id !== cid) return safeAnswerCb(ctx, 'Отменено');
+    if (!st || st.step !== 'pick_challenge_habits') return safeAnswerCb(ctx, 'Отменено');
     const cat = st.challenge;
     if (st.selected.size === 0) return safeAnswerCb(ctx, 'Выбери хотя бы одну');
     // Создать челлендж
@@ -1535,18 +1532,19 @@ bot.on('callback_query:data', async (ctx) => {
       ends_at: Math.floor(Date.now()/1000) + cat.days*86400,
       completed: 0, checkDays: 0,
     };
-    // Создать выбранные привычки
+    // Создать выбранные привычки через addHabitSafe (dedup)
     const habitBtns = [];
     for (const i of st.selected) {
       const h = cat.habits[i];
-      const habitId = uid();
-      db.habits[habitId] = {
-        id: habitId, owner_id: tgId,
-        name: h.name, emoji: h.emoji, color: cat.color,
-        category: 'challenge', challengeId: id,
-        freq: h.freq, created: Math.floor(Date.now()/1000), checks: [],
-      };
-      habitBtns.push([{ text: `${h.emoji || '📌'} ${h.name}`, callback_data: `t:${habitId}` }]);
+      const result = addHabitSafe(tgId, h.name, h.emoji, cat.color);
+      if (result.ok) {
+        const habitId = result.id;
+        if (db.habits[habitId]) {
+          db.habits[habitId].category = 'challenge';
+          db.habits[habitId].challengeId = id;
+        }
+        habitBtns.push([{ text: `${h.emoji || '📌'} ${h.name}`, callback_data: `t:${habitId}` }]);
+      }
     }
     saveDB();
     onboardState.delete(tgId);
@@ -1561,22 +1559,31 @@ bot.on('callback_query:data', async (ctx) => {
 });
 
 // ---------- WebApp actions ----------
+const VALID_PALETTES = new Set(['forest', 'sunset', 'ocean', 'lavender']); // Допустимые палитры
 bot.on('message:web_app_data', async (ctx) => {
   let p;
   try { p = JSON.parse(ctx.message.web_app_data.data); } catch { return; }
+  if (!p || typeof p !== 'object') return;
   const tgId = ctx.from.id;
   const u = getUser(tgId);
   if (p.action === 'set_palette' && p.palette) {
-    u.palette = p.palette; saveDB(); return;
+    // Валидация: только разрешённые палитры
+    u.palette = VALID_PALETTES.has(p.palette) ? p.palette : 'forest';
+    saveDB(); return;
   }
   if (p.action === 'set_profile' && p.name) {
-    u.name = p.name.slice(0, 40);
-    if (p.reminder_time) u.reminder_time = p.reminder_time;
+    u.name = String(p.name).slice(0, 40);
+    if (p.reminder_time && /^(\d{1,2}):(\d{2})$/.test(p.reminder_time)) {
+      u.reminder_time = p.reminder_time;
+    }
     saveDB(); return;
   }
   if (p.action === 'set_reminder' && p.reminder_time) {
-    u.reminder_time = p.reminder_time;
-    saveDB(); return;
+    if (/^(\d{1,2}):(\d{2})$/.test(p.reminder_time)) {
+      u.reminder_time = p.reminder_time;
+      saveDB();
+    }
+    return;
   }
   if (p.action === 'toggle_habit' && p.habit_id) {
     const h = getHabit(p.habit_id, tgId);
@@ -1587,11 +1594,13 @@ bot.on('message:web_app_data', async (ctx) => {
     if (!was) {
       // CHECK: отмечаем
       let streak = 0;
+      const nowD = new Date();
       for (let i = 0; i < 365; i++) {
-        const d = new Date();
+        const d = new Date(nowD);
         d.setDate(d.getDate() - i);
         const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        if (isChecked(p.habit_id, key)) streak++; else break;
+        if (isChecked(p.habit_id, key)) streak++;
+        else if (i > 0) break; // Сегодня пуст — ОК
       }
       h.streak = streak; h.best = Math.max(h.best, streak);
       u.total_checks += 1; u.best_streak = Math.max(u.best_streak, streak); u.last_check_day = day;
@@ -1599,20 +1608,26 @@ bot.on('message:web_app_data', async (ctx) => {
       checkAchievementsOnCheck(null, tgId, p.habit_id, streak, hour);
     } else {
       // UNCHECK: снимаем отметку
-      // Рекалькулировать streak (может уменьшиться)
+      // Рекалькулировать streak (от вчера назад)
       let streak = 0;
-      for (let i = 1; i < 365; i++) { // i=1 потому что сегодня уже false
-        const d = new Date();
+      const nowD = new Date();
+      for (let i = 1; i < 365; i++) {
+        const d = new Date(nowD);
         d.setDate(d.getDate() - i);
         const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         if (isChecked(p.habit_id, key)) streak++; else break;
       }
       h.streak = streak;
       if (u.total_checks > 0) u.total_checks -= 1;
-      // last_check_day НЕ сбрасываем — может быть другая привычка
       // Проверим: остались ли отметки на сегодня у других привычек
-      const allTodayDone = getHabits(tgId).every(xh => isChecked(xh.id, day));
-      if (!allTodayDone) u.last_check_day = null; // Раз не всё отмечено — пуш можно слать
+      const userHabits = getHabits(tgId);
+      // Защита: если 0 привычек, last_check_day = null (нет что отмечать)
+      if (userHabits.length === 0) {
+        u.last_check_day = null;
+      } else {
+        const allTodayDone = userHabits.every(xh => isChecked(xh.id, day));
+        if (!allTodayDone) u.last_check_day = null;
+      }
     }
     saveDB();
     return;
@@ -1627,50 +1642,27 @@ bot.on('message:web_app_data', async (ctx) => {
     const h = getHabit(p.habit_id, tgId);
     if (h) {
       delete db.habits[p.habit_id];
-      // Очистить связанные чеки
+      // Очистить связанные чеки (формат: id::YYYY-MM-DD)
+      const prefix = p.habit_id + '::';
       for (const k of Object.keys(db.checks)) {
-        if (k.startsWith(p.habit_id + '::') || k === p.habit_id) delete db.checks[k];
+        if (k.startsWith(prefix)) delete db.checks[k];
       }
-      // Рекалькулировать best_streak юзера по оставшимся привычкам
-      const userHabits = getHabits(tgId);
-      if (userHabits.length > 0) {
-        const maxBest = Math.max(0, ...userHabits.map(x => x.best || 0));
-        u.best_streak = Math.max(u.best_streak, maxBest);
-      }
+      // best_streak не должен уменьшаться при удалении (исторический максимум)
+      // Поэтому НЕ пересчитываем — оставляем как есть
       saveDB();
     }
     return;
   }
   if (p.action === 'start_challenge' && p.challenge_id) {
-    const cat = CHALLENGES.find(c => c.id === p.challenge_id);
-    if (!cat) return;
-    const id = uid();
-    db.challenges[id] = { id, owner_id: tgId, title: cat.title, emoji: cat.emoji, description: cat.desc, days: cat.days, color: cat.color, started_at: Math.floor(Date.now()/1000), ends_at: Math.floor(Date.now()/1000) + cat.days*86400, completed: 0, checkDays: 0 };
-    // Создаём связанные привычки
-    if (cat.habits && cat.habits.length) {
-      for (const h of cat.habits) {
-        const habitId = uid();
-        db.habits[habitId] = { id: habitId, owner_id: tgId, name: h.name, emoji: h.emoji, color: cat.color, category: 'challenge', challengeId: id, freq: h.freq, created: Math.floor(Date.now()/1000), checks: [] };
-      }
-    } else if (cat.habitName) {
-      const habitId = uid();
-      db.habits[habitId] = { id: habitId, owner_id: tgId, name: cat.habitName, emoji: cat.habitEmoji, color: cat.color, category: 'challenge', challengeId: id, freq: cat.habitFreq, created: Math.floor(Date.now()/1000), checks: [] };
-    }
-    saveDB();
-    try { await safeReply(ctx, `🚀 Старт: ${cat.emoji} ${cat.title}\n\n${cat.days} дней. Привычки добавлены на главную. Поехали!`); } catch {}
+    // ВАЖНО: дубликат с /api/action — но через sendData мы придём позже
+    // Все данные уже созданы в /api/action (это PRIMARY путь)
+    // sendData — это только уведомление для бота, ничего не создаём
+    // (Иначе будут дубли челленджей)
     return;
   }
   if (p.action === 'check_challenge' && p.challenge_id) {
-    const c = db.challenges[p.challenge_id];
-    if (!c || c.owner_id !== tgId || c.completed) return;
-    const day = todayKey();
-    const key = `${c.id}::${day}`;
-    if (db.checks[key]) return;
-    db.checks[key] = true;
-    c.checkDays = (c.checkDays || 0) + 1;
-    if (c.checkDays >= c.days) c.completed = 1;
-    saveDB();
-    try { await safeReply(ctx, `✓ ${c.emoji} ${c.title}: день ${c.checkDays}/${c.days}`); } catch {}
+    // Также дублируется — данные уже в /api/action
+    // Ничего не делаем, бот уже ответил через /api/action
     return;
   }
 });

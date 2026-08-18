@@ -69,7 +69,7 @@ function safeEditMarkup(ctx, markup) {
 
 // ---------- Config ----------
 const TOKEN = process.env.BOT_TOKEN;
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 10000); // Render default
 const DATA_FILE = process.env.DATA_FILE || 'data.json';
 
 // Умный выбор URL для Mini App:
@@ -96,15 +96,27 @@ if (!TOKEN) { logger.critical('Set BOT_TOKEN env var'); process.exit(1); }
 
 const bot = new Bot(TOKEN);
 
-// Rate limit
+// Rate limit — защита от спама (макс 5 update в секунду на юзера)
 const rateLimit = new Map();
+const RATE_LIMIT_WINDOW = 1000;
+const RATE_LIMIT_MAX = 5;
+function checkRateLimit(tgId) {
+  const now = Date.now();
+  let arr = rateLimit.get(tgId);
+  if (!arr) { arr = []; rateLimit.set(tgId, arr); }
+  // Чистим старые timestamps in-place (O(1) amortized)
+  while (arr.length && now - arr[0] > RATE_LIMIT_WINDOW) arr.shift();
+  if (arr.length >= RATE_LIMIT_MAX) return false;
+  arr.push(now);
+  return true;
+}
 bot.use(async (ctx, next) => {
   if (ctx.from?.id) {
-    const now = Date.now();
-    const arr = (rateLimit.get(ctx.from.id) || []).filter(t => now - t < 1000);
-    arr.push(now);
-    rateLimit.set(ctx.from.id, arr);
-    if (arr.length > 5) return;
+    if (!checkRateLimit(ctx.from.id)) {
+      logger.warn('Rate limit hit', { user: ctx.from.id });
+      // Тихо игнорируем, не отвечаем (чтобы не спамить в ответ)
+      return;
+    }
   }
   return next();
 });
@@ -148,9 +160,11 @@ async function loadFromGist() {
 }
 
 async function saveToGist() {
-  if (!GIST_ID || !GIST_TOKEN) return;
+  if (!GIST_ID || !GIST_TOKEN) return false;
   try {
-    await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+    // Snapshot данных чтобы не сериализовать в Gist мутирующий объект
+    const snapshot = JSON.stringify(db);
+    const r = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
       method: 'PATCH',
       headers: {
         'Authorization': `token ${GIST_TOKEN}`,
@@ -158,13 +172,17 @@ async function saveToGist() {
         'Accept': 'application/vnd.github+json',
       },
       body: JSON.stringify({
-        files: {
-          [GIST_FILE]: { content: JSON.stringify(db, null, 2) }
-        }
+        files: { [GIST_FILE]: { content: snapshot } }
       })
     });
+    if (!r.ok) {
+      logger.error('saveToGist failed', `HTTP ${r.status}`);
+      return false;
+    }
+    return true;
   } catch (e) {
     logger.error('saveToGist failed', e.message);
+    return false;
   }
 }
 
@@ -181,11 +199,11 @@ async function loadDB() {
       logger.info('Loaded DB from local file');
     } catch (e) {}
   }
-  if (loaded) {
+  if (loaded && typeof loaded === 'object') {
     // ВАЖНО: мутируем db, а не переприсваиваем (let-binding)
     // Иначе функции в замыкании потеряют ссылку
     for (const k of Object.keys(loaded)) {
-      db[k] = loaded[k];
+      if (loaded[k] !== undefined) db[k] = loaded[k];
     }
   }
   // Защита от битой структуры
@@ -197,6 +215,7 @@ async function loadDB() {
   // Дополнить дефолтами существующих юзеров
   for (const tgId of Object.keys(db.users)) {
     const u = db.users[tgId];
+    if (!u || typeof u !== 'object') { delete db.users[tgId]; continue; }
     if (typeof u.palette !== 'string') u.palette = 'forest';
     if (typeof u.reminder_time !== 'string') u.reminder_time = '09:00';
     if (typeof u.total_checks !== 'number') u.total_checks = 0;
@@ -206,8 +225,12 @@ async function loadDB() {
 }
 let saveTimer = null;
 let saveInProgress = false;
+let savePending = false; // есть ли изменения, ожидающие сохранения
 async function saveDBNow() {
-  if (saveInProgress) return;
+  if (saveInProgress) {
+    savePending = true;
+    return;
+  }
   saveInProgress = true;
   const tmpFile = DATA_FILE + '.tmp';
   try {
@@ -222,6 +245,11 @@ async function saveDBNow() {
     logger.error('saveDB failed', e);
   } finally {
     saveInProgress = false;
+    // Если были изменения пока шла запись — сохраняем ещё раз
+    if (savePending) {
+      savePending = false;
+      setImmediate(saveDBNow);
+    }
   }
 }
 function saveDB() {
@@ -231,29 +259,40 @@ function saveDB() {
 
 // Helpers
 function getUser(tgId) {
-  if (!db.users[tgId]) {
-    db.users[tgId] = {
+  // ВАЖНО: ключ всегда строка для консистентности
+  const key = String(tgId);
+  if (!db.users[key]) {
+    db.users[key] = {
       tg_id: tgId, name: 'друг', emoji: '🙂', palette: 'forest',
       onboard_step: 0, best_streak: 0, total_checks: 0,
       reminder_time: '09:00', last_seen_at: 0, last_check_day: null,
     };
-    saveDBNow();
+    saveDB(); // Сохраняем отложенно (debounce)
   }
-  return db.users[tgId];
+  return db.users[key];
 }
 function getHabits(tgId) {
-  return Object.values(db.habits).filter(h => h.owner_id === tgId);
+  // Сравниваем через String() для устойчивости к типу
+  const key = String(tgId);
+  return Object.values(db.habits).filter(h => String(h.owner_id) === key);
 }
 function getHabit(id, tgId) {
   const h = db.habits[id];
-  if (h && h.owner_id === tgId) return h;
+  if (h && String(h.owner_id) === String(tgId)) return h;
   return null;
 }
-function checkKey(habitId, day) { return `${habitId}::${day}`; }
+function checkKey(habitId, day) {
+  // Валидация day — должен быть строкой YYYY-MM-DD
+  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    day = todayKey();
+  }
+  return `${habitId}::${day}`;
+}
 function isChecked(habitId, day) { return !!db.checks[checkKey(habitId, day)]; }
 function setCheck(habitId, day, on) {
-  if (on) db.checks[checkKey(habitId, day)] = true;
-  else delete db.checks[checkKey(habitId, day)];
+  const k = checkKey(habitId, day);
+  if (on) db.checks[k] = true;
+  else delete db.checks[k];
 }
 
 const todayKey = () => {
@@ -268,10 +307,11 @@ function addHabitSafe(tgId, name, emoji = '✨', color = '#5fb357') {
   // Нормализуем имя для сравнения
   const normalizedName = String(name || '').trim().slice(0, 60);
   if (!normalizedName) return { ok: false, error: 'empty name' };
-  // Ищем существующую привычку (case-insensitive)
+  // Ищем существующую привычку (case-insensitive, String-safe)
   const lowerName = normalizedName.toLowerCase();
+  const tgKey = String(tgId);
   for (const h of Object.values(db.habits)) {
-    if (h.owner_id === tgId && h.name.toLowerCase() === lowerName) {
+    if (String(h.owner_id) === tgKey && h.name.toLowerCase() === lowerName) {
       return { ok: true, id: h.id, deduped: true };
     }
   }
@@ -815,15 +855,20 @@ function getLevelProgress(totalChecks) {
 
 // ---------- Режим тишины ----------
 function isSilent(tgId) {
-  const u = db.users[tgId];
+  const u = db.users[String(tgId)];
   const s = u && u.silent;
-  if (!s) return false;
-  const now = Math.floor(Date.now() / 1000);
+  if (!s || typeof s !== 'object') return false;
   // s = { from: '22:00', to: '08:00' } — формат HH:MM
   if (!s.from || !s.to) return false;
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-  const [fh, fm] = s.from.split(':').map(Number);
-  const [th, tm] = s.to.split(':').map(Number);
+  const fromParts = String(s.from).split(':');
+  const toParts = String(s.to).split(':');
+  if (fromParts.length !== 2 || toParts.length !== 2) return false;
+  const fh = parseInt(fromParts[0], 10);
+  const fm = parseInt(fromParts[1], 10);
+  const th = parseInt(toParts[0], 10);
+  const tm = parseInt(toParts[1], 10);
+  if (isNaN(fh) || isNaN(fm) || isNaN(th) || isNaN(tm)) return false;
   const fromMin = fh * 60 + fm;
   const toMin = th * 60 + tm;
   if (fromMin < toMin) {
@@ -883,10 +928,15 @@ bot.command('delete', async (ctx) => {
   const name = text.replace(/^\/delete\s*/i, '').trim();
   if (!name) return safeReply(ctx, 'Формат: /delete Название\nНапример: /delete Вода');
   const tgId = ctx.from.id;
-  const habits = Object.values(db.habits).filter(h => h.owner_id === tgId);
+  const habits = getHabits(tgId); // Используем безопасный helper
   const found = habits.find(h => h.name.toLowerCase() === name.toLowerCase());
   if (!found) return safeReply(ctx, `Не нашёл «${name}»\n\nТвои: ${habits.map(h => h.name).join(', ') || 'нет'}`);
   delete db.habits[found.id];
+  // ВАЖНО: очищаем все чеки для этой привычки (избегаем утечки памяти)
+  const prefix = found.id + '::';
+  for (const k of Object.keys(db.checks)) {
+    if (k.startsWith(prefix)) delete db.checks[k];
+  }
   saveDB();
   return safeReply(ctx, `Удалил «${found.name}»`);
 });
@@ -913,32 +963,23 @@ bot.command('silent', async (ctx) => {
     saveDB();
     return safeReply(ctx, 'Режим тишины выключен.');
   }
-  const m = arg.match(/^(\d{1,2}):?(\d{2})\s+(\d{1,2}):?(\d{2})$/);
+  const m = arg.match(/^(\d{1,2}):(\d{2})\s+(\d{1,2}):(\d{2})$/);
   if (!m) return safeReply(ctx, 'Формат: /silent 22:00 08:00');
+  const fh = parseInt(m[1], 10);
+  const fm = parseInt(m[2], 10);
+  const th = parseInt(m[3], 10);
+  const tm = parseInt(m[4], 10);
+  // Валидация диапазонов
+  if (fh < 0 || fh > 23 || fm < 0 || fm > 59 || th < 0 || th > 23 || tm < 0 || tm > 59) {
+    return safeReply(ctx, 'Некорректное время. Формат: /silent 22:00 08:00');
+  }
   const u = getUser(ctx.from.id);
   u.silent = { from: `${m[1].padStart(2,'0')}:${m[2]}`, to: `${m[3].padStart(2,'0')}:${m[4]}` };
   saveDB();
   return safeReply(ctx, `Тишина: с ${u.silent.from} до ${u.silent.to}. Бот не будет беспокоить в это время.`);
 });
 
-async function showStatsInline2(ctx) {
-  const tgId = ctx.from.id;
-  const u = getUser(tgId);
-  const habits = getHabits(tgId);
-  if (habits.length === 0) return safeReply(ctx, 'Нет привычек. /add Название');
-  const total = u.total_checks || 0;
-  const best = u.best_streak || 0;
-  const avgPct = Math.round(habits.reduce((s,h)=>s+(h.percent30||0),0)/habits.length);
-  let text = `Статистика\n\n`;
-  text += `Среднее: ${avgPct}%\n`;
-  text += `Всего отметок: ${total}\n`;
-  text += `Лучшая серия: ${best} дней\n\n`;
-  text += `По привычкам:\n`;
-  for (const h of habits) {
-    text += ` ${h.emoji || '📌'} ${h.name}: ${h.percent30 || 0}% (${h.totalChecks || 0} ✓, 🔥${h.best || 0})\n`;
-  }
-  return safeReply(ctx, text);
-}
+// Удалена неиспользуемая showStatsInline2 — заменена на showStatsInline
 
 // ---------- Onboarding ----------
 bot.command('start', async (ctx) => {
@@ -989,13 +1030,16 @@ function buildOnboardKeyboard(tgId) {
   const st = getObState(tgId);
   const picked = st?.picked || new Set();
   const habitButtons = [];
-  const habitLetters = Object.keys(ONBOARD[0].options);
+  // Фиксированный порядок букв для UI
+  const habitLetters = ['А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ж', 'З'];
   for (let i = 0; i < habitLetters.length; i += 2) {
     const a = habitLetters[i], b = habitLetters[i+1];
     const aMark = picked.has(a) ? '✅ ' : '';
     const bMark = b && picked.has(b) ? '✅ ' : '';
-    const row = [{ text: `${aMark}${a} ${HABIT_NAMES[ONBOARD[0].options[a]][1]}`, callback_data: `ob_pick:${a}` }];
-    if (b) row.push({ text: `${bMark}${b} ${HABIT_NAMES[ONBOARD[0].options[b]][1]}`, callback_data: `ob_pick:${b}` });
+    const aName = HABIT_NAMES[ONBOARD[0].options[a]]?.[1] || a;
+    const bName = b ? HABIT_NAMES[ONBOARD[0].options[b]]?.[1] || b : null;
+    const row = [{ text: `${aMark}${a} ${aName}`, callback_data: `ob_pick:${a}` }];
+    if (b && bName) row.push({ text: `${bMark}${b} ${bName}`, callback_data: `ob_pick:${b}` });
     habitButtons.push(row);
   }
   habitButtons.push([
@@ -1203,7 +1247,8 @@ async function showStats(ctx) {
 
 async function showChallengePicker(ctx) {
   const tgId = ctx.from.id;
-  const myChallenges = Object.values(db.challenges).filter(c => c.owner_id === tgId);
+  const tgKey = String(tgId);
+  const myChallenges = Object.values(db.challenges).filter(c => String(c.owner_id) === tgKey);
   const rows = [];
   for (let i = 0; i < CHALLENGES.length; i += 2) {
     const a = CHALLENGES[i], b = CHALLENGES[i+1];
@@ -1811,8 +1856,9 @@ run();
       getUser(tgId); // Создаёт с дефолтами
       saveDB();
     }
-    const u = db.users[tgId];
-    const habits = Object.values(db.habits).filter(h => h.owner_id === tgId);
+    const u = db.users[String(tgId)];
+    const tgKey = String(tgId);
+    const habits = Object.values(db.habits).filter(h => String(h.owner_id) === tgKey);
     const today = todayKey();
     const habitsWithStats = habits.map(h => {
       const doneDays = [];
@@ -1823,7 +1869,7 @@ run();
         if (isChecked(h.id, key)) doneDays.push(key);
       }
       const doneCount = doneDays.length;
-      return { id: h.id, name: h.name, emoji: h.emoji, color: h.color, streak: h.streak, best: h.best, doneDays, totalChecks: doneCount, percent30: Math.round(doneCount/30*100) };
+      return { id: h.id, name: h.name, emoji: h.emoji, color: h.color, streak: h.streak || 0, best: h.best || 0, doneDays, totalChecks: doneCount, percent30: Math.round(doneCount/30*100) };
     });
     const doneToday = habitsWithStats.filter(h => h.doneDays.includes(today)).length;
     const payload = {
@@ -1831,8 +1877,8 @@ run();
       today: { date: today, done: doneToday, total: habitsWithStats.length },
       stats: { avgPercent: habitsWithStats.length ? Math.round(habitsWithStats.reduce((s,h)=>s+h.percent30,0)/habitsWithStats.length) : 0, bestStreak: u.best_streak, totalChecks: u.total_checks },
       habits: habitsWithStats,
-      challenges: Object.values(db.challenges || {}).filter(c => c.owner_id === tgId),
-      achievements: Object.values(db.achievements || {}).filter(a => a.tg_id === tgId),
+      challenges: Object.values(db.challenges || {}).filter(c => String(c.owner_id) === tgKey),
+      achievements: Object.values(db.achievements || {}).filter(a => String(a.tg_id) === tgKey),
       challengeCatalog: CHALLENGES.map(c => ({
         id: c.id, title: c.title, emoji: c.emoji, shortDesc: c.shortDesc,
         description: c.desc,

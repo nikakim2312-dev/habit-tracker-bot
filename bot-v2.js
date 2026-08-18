@@ -151,8 +151,11 @@ async function loadFromGist() {
     if (!r.ok) return null;
     const data = await r.json();
     const file = data.files?.[GIST_FILE];
-    if (!file) return null;
-    return JSON.parse(file.content);
+    if (!file || !file.content) return null;
+    const parsed = JSON.parse(file.content);
+    // Защита: должен быть объект
+    if (typeof parsed !== 'object' || !parsed) return null;
+    return parsed;
   } catch (e) {
     logger.error('loadFromGist failed', e.message);
     return null;
@@ -759,16 +762,20 @@ function pickPush(arr, name) {
 
 // ---------- Достижения / Награды (заглушки) ----------
 async function checkAchievementsOnCheck(ctx, tgId, habitId, streak, hour) {
+  // Защита от undefined
+  const u = db.users[String(tgId)];
+  if (!u) return;
   // Первая отметка
-  const u = db.users[tgId];
-  if (u && u.total_checks >= 1) giveAchievement(tgId, 'first_check');
+  if (u.total_checks >= 1) giveAchievement(tgId, 'first_check');
   // Уровни (по общему числу отметок)
-  if (u && u.total_checks >= 50) giveAchievement(tgId, 'level_5');
-  if (u && u.total_checks >= 100) giveAchievement(tgId, 'level_10');
-  if (u && u.total_checks >= 250) giveAchievement(tgId, 'level_25');
+  if (u.total_checks >= 50) giveAchievement(tgId, 'level_5');
+  if (u.total_checks >= 100) giveAchievement(tgId, 'level_10');
+  if (u.total_checks >= 250) giveAchievement(tgId, 'level_25');
   // Достижения: ранняя пташка, ночная сова
-  if (hour >= 5 && hour < 9) giveAchievement(tgId, 'early_bird');
-  if (hour >= 22 || hour < 4) giveAchievement(tgId, 'night_owl');
+  if (typeof hour === 'number') {
+    if (hour >= 5 && hour < 9) giveAchievement(tgId, 'early_bird');
+    if (hour >= 22 || hour < 4) giveAchievement(tgId, 'night_owl');
+  }
   // За серии
   if (streak >= 3) giveAchievement(tgId, 'streak_3');
   if (streak >= 7) giveAchievement(tgId, 'streak_7');
@@ -780,6 +787,10 @@ async function checkAchievementsOnCheck(ctx, tgId, habitId, streak, hour) {
 function giveAchievement(tgId, code) {
   const key = `${tgId}::${code}`;
   if (db.achievements[key]) return false;
+  // Лимит: макс 100 достижений на юзера (защита от переполнения)
+  const tgKey = String(tgId);
+  const userCount = Object.values(db.achievements).filter(a => String(a.tg_id) === tgKey).length;
+  if (userCount >= 100) return false;
   db.achievements[key] = { tg_id: tgId, code, date: todayKey() };
   saveDB();
   return true;
@@ -789,11 +800,16 @@ function giveReward(tgId, text) {
   logger.info(`[REWARD] tg=${tgId}: ${text}`);
 }
 async function sendPush(tgId, push, cta = 'menu:today', extra = '') {
+  // Защита от undefined tgId
+  if (!tgId || !push || !push.text) {
+    logger.warn('sendPush: missing tgId or push');
+    return;
+  }
   try {
     await bot.api.sendMessage(
       tgId,
       push.text + (extra ? '\n\n' + extra : ''),
-      { reply_markup: { inline_keyboard: [[{ text: push.btn, callback_data: cta }]] } }
+      { reply_markup: { inline_keyboard: [[{ text: push.btn || 'OK', callback_data: cta }]] } }
     );
   } catch (e) { logger.error('sendPush failed', e); }
 }
@@ -1660,54 +1676,65 @@ bot.on('message:web_app_data', async (ctx) => {
 });
 
 // ---------- Scheduler ----------
+// Вызывается каждую минуту
 setInterval(async () => {
   try {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
     const nowStr = `${hh}:${mm}`;
-    for (const tgId in db.users) {
+    for (const tgId of Object.keys(db.users)) {
       try {
         const u = db.users[tgId];
-        if (u.onboard_step < 100) continue;
-        if (u.reminder_time !== nowStr) continue;
-        const key = `remind:${nowStr}`;
+        if (!u || u.onboard_step < 100) continue;
+        if (isSilent(Number(tgId))) continue;
+        // reminder_time может быть "08:00" или "off" — пропускаем off
+        if (!u.reminder_time || u.reminder_time === 'off') continue;
+        // ВАЖНО: пушим в нужный час (с окном 0-1 минута) — старый код требовал точное совпадение
+        // Сейчас сравниваем только часы (любая минута в часе триггерит)
+        const reminderHour = u.reminder_time.split(':')[0];
+        if (reminderHour !== hh) continue;
+        const key = `remind:${nowStr}:${u.reminder_time}`;
         if (wasSent(tgId, key)) continue;
         const habits = getHabits(Number(tgId));
         if (habits.length === 0) continue;
-        if (u.last_check_day === todayKey()) continue;
+        // Пушим только если сегодня ещё НЕ все отмечены
+        const day = todayKey();
+        const done = habits.filter(h => isChecked(h.id, day)).length;
+        if (done === habits.length) continue;
         let pool;
-        if (nowStr === '22:00' || nowStr === '20:00') pool = PUSH.night;
-        else if (nowStr === '19:00') pool = PUSH.evening;
-        else if (nowStr === '13:00') pool = PUSH.day;
-        else if (nowStr === '08:00') pool = PUSH.morning;
+        if (u.reminder_time === '22:00' || u.reminder_time === '20:00') pool = PUSH.night;
+        else if (u.reminder_time === '19:00') pool = PUSH.evening;
+        else if (u.reminder_time === '13:00') pool = PUSH.day;
+        else if (u.reminder_time === '08:00') pool = PUSH.morning;
         else pool = PUSH.bold;
         await sendPush(Number(tgId), pickPush(pool, u.name));
         markSent(tgId, key);
       } catch (e) {
-        logger.error(`Scheduler error for user ${tgId}`, e);
+        logger.error(`Scheduler error for user ${tgId}`, e.message);
       }
     }
     // 1 раз в день в 19:00 — comeback push
     if (nowStr === '19:00') {
-      for (const tgId in db.users) {
+      for (const tgId of Object.keys(db.users)) {
         try {
           const u = db.users[tgId];
-          if (u.onboard_step < 100) continue;
+          if (!u || u.onboard_step < 100) continue;
+          if (isSilent(Number(tgId))) continue;
           const day = todayKey();
           const habits = getHabits(Number(tgId));
           const done = habits.filter(h => isChecked(h.id, day)).length;
           if (done === habits.length && habits.length > 0) continue;
           const last = u.last_seen_at || 0;
-          const now = Math.floor(Date.now() / 1000);
-          if (now - last < 2 * 86400) continue;
-          const key = `comeback:${Math.floor(now / 3600)}`;
+          const nowSec = Math.floor(Date.now() / 1000);
+          if (nowSec - last < 2 * 86400) continue;
+          const key = `comeback:${Math.floor(nowSec / 3600)}`;
           if (wasSent(tgId, key)) continue;
-          const pool = now - last > 5 * 86400 ? PUSH.long_away : PUSH.comeback;
+          const pool = nowSec - last > 5 * 86400 ? PUSH.long_away : PUSH.comeback;
           await sendPush(Number(tgId), pickPush(pool, u.name));
           markSent(tgId, key);
         } catch (e) {
-          logger.error(`Comeback scheduler error for user ${tgId}`, e);
+          logger.error(`Comeback scheduler error for user ${tgId}`, e.message);
         }
       }
     }
@@ -1715,7 +1742,8 @@ setInterval(async () => {
     logger.error('Scheduler tick failed', e);
   }
 }, 60 * 1000);
-setInterval(() => { sentToday.clear(); }, 60 * 60 * 1000);
+// Очистка sentToday раз в сутки (по UTC), не каждый час — иначе дубли пушей
+setInterval(() => { sentToday.clear(); }, 24 * 60 * 60 * 1000);
 
 // ---------- HTTP API ----------
 const CORS = {
@@ -1737,7 +1765,23 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/webhook' && req.method === 'POST') {
     try {
       let body = '';
-      for await (const chunk of req) body += chunk;
+      let totalSize = 0;
+      const MAX_BODY = 1024 * 1024; // 1MB — Telegram updates редко больше
+      for await (const chunk of req) {
+        totalSize += chunk.length;
+        if (totalSize > MAX_BODY) {
+          req.destroy();
+          res.writeHead(413, { 'Content-Type': 'application/json', ...CORS });
+          res.end(JSON.stringify({ error: 'payload too large' }));
+          return;
+        }
+        body += chunk;
+      }
+      if (!body) {
+        res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+        res.end(JSON.stringify({ error: 'empty body' }));
+        return;
+      }
       const update = JSON.parse(body);
       await bot.handleUpdate(update);
       res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
@@ -1852,12 +1896,12 @@ run();
       return;
     }
     // Автоматически создать юзера если его нет (для WebApp first-time)
-    if (!db.users[tgId]) {
+    const tgKey = String(tgId);
+    if (!db.users[tgKey]) {
       getUser(tgId); // Создаёт с дефолтами
       saveDB();
     }
-    const u = db.users[String(tgId)];
-    const tgKey = String(tgId);
+    const u = db.users[tgKey];
     const habits = Object.values(db.habits).filter(h => String(h.owner_id) === tgKey);
     const today = todayKey();
     const habitsWithStats = habits.map(h => {
@@ -1915,7 +1959,15 @@ run();
   // === POST /api/action — WebApp может менять данные напрямую ===
   if (url.pathname === '/api/action' && req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; if (body.length > 1024) req.destroy(); });
+    const MAX_ACTION_BODY = 16 * 1024; // 16KB — челлендж с habits до 4 привычек
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > MAX_ACTION_BODY) {
+        req.destroy();
+        res.writeHead(413, { 'Content-Type': 'application/json', ...CORS });
+        res.end(JSON.stringify({ error: 'payload too large' }));
+      }
+    });
     req.on('end', () => {
       let action = null;
       try { action = JSON.parse(body); } catch (e) {
@@ -1963,6 +2015,11 @@ run();
             const h = getHabit(action.habit_id, tgId);
             if (!h) throw new Error('not found');
             delete db.habits[action.habit_id];
+            // ВАЖНО: очищаем все чеки для удалённой привычки (избегаем утечки)
+            const prefix = action.habit_id + '::';
+            for (const k of Object.keys(db.checks)) {
+              if (k.startsWith(prefix)) delete db.checks[k];
+            }
             saveDB();
             res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
             res.end(JSON.stringify({ ok: true }));
@@ -2031,15 +2088,19 @@ run();
             throw new Error('unknown action');
         }
       } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
-        res.end(JSON.stringify({ error: e.message }));
+        // Проверяем, не отправлен ли уже ответ (при 413)
+        if (!res.headersSent) {
+          res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+          res.end(JSON.stringify({ error: e.message }));
+        }
         return;
       }
     });
     return;
   }
 
-  res.writeHead(404, CORS); res.end('not found');
+  res.writeHead(404, { 'Content-Type': 'application/json', ...CORS });
+  res.end(JSON.stringify({ error: 'not found' }));
 });
 server.listen(PORT, '0.0.0.0', () => logger.info(`HTTP API on :${PORT}`));
 

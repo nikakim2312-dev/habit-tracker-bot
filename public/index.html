@@ -1447,48 +1447,32 @@
     c.innerHTML = html;
     c.querySelectorAll('[data-cid]').forEach(b => b.onclick = async () => {
       const cid = b.dataset.cid;
+      // Оптимистичное обновление UI
       const ch = state.myChallenges.find(c => c.id === cid);
       if (ch) {
         ch.checkDays = (ch.checkDays || 0) + 1;
         if (ch.checkDays >= ch.days) ch.completed = 1;
       }
-      sendAction('check_challenge', { challenge_id: cid });
       toast('день отмечен ✓');
-      await refreshData();
-      renderChallenge();
+      // Отправляем на сервер — он создаст/обновит челлендж в БД
+      // sendAction сделает refresh и UI обновится с правильным id
+      await sendAction('check_challenge', { challenge_id: cid });
     });
     c.querySelectorAll('[data-start]').forEach(b => b.onclick = async () => {
       const cid = b.dataset.start;
       const cat = state.challengeCatalog.find(c => c.id === cid);
-      if (cat) {
-        // Локально создаём челлендж
-        const newCh = {
-          id: 'tmp_ch_' + Date.now(),
-          title: cat.title, emoji: cat.emoji, description: cat.description || cat.desc,
-          days: cat.days, color: cat.color, completed: 0, checkDays: 0,
-        };
-        state.myChallenges.push(newCh);
-        // Локально создаём привычки из челленджа
-        if (cat.habits && cat.habits.length) {
-          for (const h of cat.habits) {
-            state.habits.push({
-              id: 'tmp_h_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
-              name: h.name, emoji: h.emoji, streak: 0, doneDays: [],
-              totalChecks: 0, percent30: 0, color: cat.color,
-            });
-          }
-        } else if (cat.habitName) {
-          state.habits.push({
-            id: 'tmp_h_' + Date.now(),
-            name: cat.habitName, emoji: cat.habitEmoji, streak: 0, doneDays: [],
-            totalChecks: 0, percent30: 0, color: cat.color,
-          });
+      if (!cat) return;
+      // Отправляем на сервер — он создаст челлендж И привычки через addHabitSafe
+      const result = await sendAction('start_challenge', { challenge_id: cid });
+      if (result?.ok) {
+        if (result.deduped) {
+          toast('уже начат ✓');
+        } else {
+          toast('🚀 челлендж начат!');
         }
+      } else {
+        toast('ошибка: ' + (result?.error || 'unknown'));
       }
-      sendAction('start_challenge', { challenge_id: cid });
-      toast('🚀 челлендж начат!');
-      await refreshData();
-      renderChallenge();
     });
   }
 
@@ -1510,15 +1494,17 @@
   // ===== Add modal =====
   let newEmoji = '💧';
   function openAddModal() {
-    document.getElementById('newName').value = '';
+    const nameEl = document.getElementById('newName');
+    if (nameEl) nameEl.value = '';
     newEmoji = '💧';
     renderEmojiRow();
-    document.getElementById('addModal').classList.add('show');
-    setTimeout(() => document.getElementById('newName').focus(), 100);
+    document.getElementById('addModal')?.classList.add('show');
+    setTimeout(() => document.getElementById('newName')?.focus(), 100);
   }
-  function closeAddModal() { document.getElementById('addModal').classList.remove('show'); }
+  function closeAddModal() { document.getElementById('addModal')?.classList.remove('show'); }
   function renderEmojiRow() {
     const row = document.getElementById('emojiRow');
+    if (!row) return;
     row.innerHTML = '';
     EMOJIS.forEach(em => {
       const b = document.createElement('button');
@@ -1528,59 +1514,110 @@
       row.appendChild(b);
     });
   }
-  document.getElementById('cancelAdd').addEventListener('click', closeAddModal);
-  document.getElementById('confirmAdd').addEventListener('click', () => {
-    const name = document.getElementById('newName').value.trim();
-    if (!name) { toast('введи название'); return; }
-    if (name.length > 60) { toast('слишком длинное'); return; }
-    // Проверка лимита
-    if (state.habits.length >= 30) { toast('лимит 30 привычек'); closeAddModal(); return; }
-    sendAction('add_habit', { name, emoji: newEmoji });
-    state.habits.push({ id: 'tmp_' + Date.now(), name, emoji: newEmoji, streak: 0, doneDays: [], totalChecks: 0, percent30: 0 });
-    closeAddModal();
-    renderHome();
-    toast('✓ добавлено');
-    setTimeout(refreshData, 1000);
-  });
+  function initAddModalListeners() {
+    const cancel = document.getElementById('cancelAdd');
+    const confirm = document.getElementById('confirmAdd');
+    if (!cancel || !confirm) {
+      setTimeout(initAddModalListeners, 100);
+      return;
+    }
+    cancel.addEventListener('click', closeAddModal);
+    confirm.addEventListener('click', async () => {
+      const name = document.getElementById('newName')?.value.trim() || '';
+      if (!name) { toast('введи название'); return; }
+      if (name.length > 60) { toast('слишком длинное'); return; }
+      if (state.habits.length >= 30) { toast('лимит 30 привычек'); closeAddModal(); return; }
+      // Закрываем модалку СРАЗУ для отзывчивости UI
+      closeAddModal();
+      // Отправляем на сервер — он создаст привычку с dedup
+      const result = await sendAction('add_habit', { name, emoji: newEmoji });
+      if (result?.ok) {
+        if (result.deduped) {
+          toast('уже есть ✓');
+        } else {
+          toast('✓ добавлено');
+        }
+      } else {
+        toast('ошибка: ' + (result?.error || 'unknown'));
+      }
+    });
+  }
+  initAddModalListeners();
 
   // ===== Settings =====
   function openSettings() {
-    document.getElementById('settingsBtn').click();
+    const btn = document.getElementById('settingsBtn');
+    if (!btn) return;
+    btn.click();
   }
-  document.getElementById('settingsBtn').addEventListener('click', () => {
-    document.getElementById('userName').value = state.user?.name || '';
-    const grid = document.getElementById('reminderOpts');
-    grid.innerHTML = '';
-    REMINDERS.forEach(r => {
-      const b = document.createElement('button');
-      b.className = 'emoji-pick';
-      b.style.fontSize = '13px';
-      b.style.padding = '14px';
-      b.textContent = r.label;
-      if (state.user?.reminder_time === r.value) {
-        b.style.background = 'var(--gradient-1)';
-        b.style.color = 'white';
-        b.style.borderColor = 'transparent';
-      }
-      b.onclick = () => { state.user.reminder_time = r.value; openSettings(); };
-      grid.appendChild(b);
-    });
-    document.getElementById('settingsModal').classList.add('show');
-  });
-  document.getElementById('closeSettings').addEventListener('click', () => document.getElementById('settingsModal').classList.remove('show'));
-  document.getElementById('saveSettings').addEventListener('click', () => {
-    const name = document.getElementById('userName').value.trim();
-    const remTime = state.user?.reminder_time || '08:00';
-    if (name) {
-      state.user.name = name;
-      sendAction('set_profile', { name, reminder_time: remTime });
-    } else {
-      sendAction('set_reminder', { reminder_time: remTime });
+  // Используем addEventListener когда DOM готов (через setTimeout чтобы init успел)
+  function initSettingsListeners() {
+    const settingsBtn = document.getElementById('settingsBtn');
+    if (!settingsBtn) {
+      // DOM ещё не готов — попробуем позже
+      setTimeout(initSettingsListeners, 100);
+      return;
     }
-    document.getElementById('settingsModal').classList.remove('show');
-    renderHome();
-    toast('сохранено ✓');
-  });
+    settingsBtn.addEventListener('click', () => {
+      const nameEl = document.getElementById('userName');
+      if (nameEl) nameEl.value = state.user?.name || '';
+      const grid = document.getElementById('reminderOpts');
+      if (!grid) return;
+      grid.innerHTML = '';
+      REMINDERS.forEach(r => {
+        const b = document.createElement('button');
+        b.className = 'emoji-pick';
+        b.style.fontSize = '13px';
+        b.style.padding = '14px';
+        b.textContent = r.label;
+        if (state.user?.reminder_time === r.value) {
+          b.style.background = 'var(--gradient-1)';
+          b.style.color = 'white';
+          b.style.borderColor = 'transparent';
+        }
+        b.onclick = () => { state.user.reminder_time = r.value; rebuildReminderGrid(grid); };
+        grid.appendChild(b);
+      });
+      document.getElementById('settingsModal')?.classList.add('show');
+    });
+    // Rebuild grid при клике на time (не открывать заново)
+    function rebuildReminderGrid(grid) {
+      grid.innerHTML = '';
+      REMINDERS.forEach(r => {
+        const b = document.createElement('button');
+        b.className = 'emoji-pick';
+        b.style.fontSize = '13px';
+        b.style.padding = '14px';
+        b.textContent = r.label;
+        if (state.user?.reminder_time === r.value) {
+          b.style.background = 'var(--gradient-1)';
+          b.style.color = 'white';
+          b.style.borderColor = 'transparent';
+        }
+        b.onclick = () => { state.user.reminder_time = r.value; rebuildReminderGrid(grid); };
+        grid.appendChild(b);
+      });
+    }
+    document.getElementById('closeSettings')?.addEventListener('click', () => {
+      document.getElementById('settingsModal')?.classList.remove('show');
+    });
+    document.getElementById('saveSettings')?.addEventListener('click', async () => {
+      const nameEl = document.getElementById('userName');
+      const name = nameEl ? nameEl.value.trim() : '';
+      const remTime = state.user?.reminder_time || '08:00';
+      // Шлём оба action по очереди (бот знает set_name и set_reminder)
+      if (name && name !== state.user?.name) {
+        await sendAction('set_name', { name });
+      }
+      if (remTime !== state.user?.reminder_time) {
+        await sendAction('set_reminder', { value: remTime });
+      }
+      document.getElementById('settingsModal')?.classList.remove('show');
+      renderHome();
+      toast('сохранено ✓');
+    });
+  }
+  initSettingsListeners();
 
   // ===== Toast =====
   function toast(msg) {
@@ -1701,7 +1738,6 @@
         } catch (e) {}
       }
     } catch (e) { console.error('refreshData:', e); }
-    return false;
     return false;
   }
 

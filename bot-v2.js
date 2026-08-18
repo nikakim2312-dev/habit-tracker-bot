@@ -169,16 +169,17 @@ async function saveToGist() {
 }
 
 async function loadDB() {
-  // Сначала пробуем Gist (persistent), потом локальный файл
+  // Сначала пробуем Gist (persistent, переживает рестарт Render)
+  // Потом fallback на локальный файл
   let loaded = null;
-  if (existsSync(DATA_FILE)) {
+  loaded = await loadFromGist();
+  if (loaded) {
+    logger.info(`Loaded DB from GitHub Gist (${Object.keys(loaded.users || {}).length} users, ${Object.keys(loaded.habits || {}).length} habits)`);
+  } else if (existsSync(DATA_FILE)) {
     try {
       loaded = JSON.parse(await fs.readFile(DATA_FILE, 'utf8'));
+      logger.info('Loaded DB from local file');
     } catch (e) {}
-  }
-  if (!loaded) {
-    loaded = await loadFromGist();
-    if (loaded) logger.info('Loaded DB from GitHub Gist');
   }
   if (loaded) {
     // ВАЖНО: мутируем db, а не переприсваиваем (let-binding)

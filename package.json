@@ -1,0 +1,20 @@
+{
+  "name": "habit-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "bot-v2.js",
+  "scripts": {
+    "start": "node bot-v2.js",
+    "dev": "node bot-v2.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["telegram", "bot", "habits", "tracker"],
+  "author": "",
+  "license": "ISC",
+  "description": "Telegram habit tracker bot with WebApp",
+  "dependencies": {
+    "grammy": "^1.45.1"
+  }
+}

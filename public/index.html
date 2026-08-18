@@ -1,0 +1,1835 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0f0c1d" />
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<title>Привычки</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+  html, body { min-height: 100vh; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+    font-weight: 400;
+    background:
+      radial-gradient(ellipse at 20% 0%, rgba(255,107,139,0.18) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 100%, rgba(127,90,240,0.18) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 50%, rgba(0,245,212,0.08) 0%, transparent 70%),
+      #0f0c1d;
+    background-attachment: fixed;
+    color: #f0eef5;
+    min-height: 100vh;
+    padding: 0 0 110px 0;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: 0.01em;
+    overflow-x: hidden;
+  }
+  h1, h2, h3, h4 { font-weight: 600; letter-spacing: -0.02em; }
+  button { font-family: inherit; }
+  input { font-family: inherit; font-weight: 400; }
+
+  /* === Палитры (приятный зелёный) === */
+  :root {
+    --bg: #0a1810;
+    --surface: rgba(255,255,255,0.06);
+    --surface-2: rgba(255,255,255,0.10);
+    --surface-3: rgba(255,255,255,0.14);
+    --border: rgba(255,255,255,0.10);
+    --text: #f0f5f2;
+    --muted: rgba(255,255,255,0.55);
+    --primary: #5fb357;
+    --primary-glow: rgba(95,179,87,0.5);
+    --accent: #2cb67d;
+    --success: #2cb67d;
+    --success-glow: rgba(44,182,125,0.5);
+    --gradient-1: linear-gradient(135deg, #5fb357 0%, #2cb67d 100%);
+    --gradient-2: linear-gradient(135deg, #7ac96b 0%, #2cb1bc 100%);
+    --gradient-3: linear-gradient(135deg, #a8e6a0 0%, #4ecdc4 100%);
+    --gradient-4: linear-gradient(135deg, #95d68a 0%, #2cb67d 100%);
+    --leaf: #5fb357;
+    --leaf-light: #95d68a;
+    --leaf-dark: #2e7d2e;
+    --shadow: 0 8px 32px rgba(0,0,0,0.3);
+    --shadow-glow: 0 8px 32px rgba(95,179,87,0.25);
+  }
+  :root[data-palette="forest"]    { --primary: #5fb357; --accent: #2cb67d; --gradient-1: linear-gradient(135deg, #5fb357, #2cb67d); }
+
+  .container { max-width: 480px; margin: 0 auto; padding: 0 20px; }
+
+  /* === Header === */
+  .header {
+    padding: 24px 20px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .hello .greeting {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .hello .name {
+    font-size: 28px;
+    font-weight: 700;
+    background: var(--gradient-1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-top: 2px;
+    letter-spacing: -0.03em;
+  }
+  .icon-btn {
+    width: 44px; height: 44px;
+    border-radius: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    display: grid; place-items: center;
+    cursor: pointer;
+    font-size: 16px;
+    backdrop-filter: blur(20px);
+    transition: all 0.2s;
+  }
+  .icon-btn:active { transform: scale(0.94); }
+
+  /* === Hero (дерево) === */
+  .hero {
+    margin: 0 0 20px;
+    padding: 28px 20px;
+    border-radius: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background: var(--gradient-1);
+    opacity: 0.05;
+    transform: rotate(-12deg);
+  }
+  .hero-tree { position: relative; }
+  .hero svg.tree-svg { width: 100px; height: 120px; }
+  .tree-label {
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    position: relative;
+  }
+  .tree-streak {
+    margin-top: 8px;
+    font-size: 18px;
+    color: var(--text);
+    font-weight: 600;
+    position: relative;
+  }
+  .tree-streak b {
+    background: var(--gradient-1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 800;
+  }
+
+  /* === Mini App card (главная фишка) === */
+  .mini-card {
+    margin: 0 0 20px;
+    padding: 20px 22px;
+    border-radius: 22px;
+    background: var(--gradient-1);
+    color: white;
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-glow);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    transition: all 0.2s;
+  }
+  .mini-card:active { transform: scale(0.98); }
+  .mini-card::before {
+    content: '';
+    position: absolute;
+    top: -50%; right: -30%;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
+  }
+  .mini-card .mini-icon {
+    font-size: 28px;
+    width: 52px; height: 52px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 16px;
+    display: grid; place-items: center;
+    flex-shrink: 0;
+    backdrop-filter: blur(10px);
+  }
+  .mini-card .mini-info { flex: 1; position: relative; }
+  .mini-card .mini-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-weight: 600;
+    opacity: 0.85;
+  }
+  .mini-card .mini-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin-top: 2px;
+  }
+  .mini-card .mini-sub {
+    font-size: 12px;
+    opacity: 0.85;
+    margin-top: 2px;
+  }
+  .mini-card .arrow { font-size: 22px; font-weight: 300; }
+
+  /* === Статистика === */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 0 0 20px;
+  }
+  .stat {
+    padding: 16px 8px;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    text-align: center;
+    box-shadow: var(--shadow);
+  }
+  .stat .v {
+    font-size: 22px;
+    font-weight: 700;
+    background: var(--gradient-1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.02em;
+  }
+  .stat .l {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-weight: 500;
+  }
+
+  /* === Заголовки секций === */
+  .section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin: 0 0 12px;
+  }
+  .section-head h2 {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-weight: 600;
+  }
+  .section-head .add {
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 600;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+  }
+
+  /* === Привычки === */
+  .habit-mini {
+    margin: 0 0 8px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: var(--shadow);
+  }
+  .habit-mini:active { transform: scale(0.98); }
+  .habit-mini.done {
+    background: var(--gradient-1);
+    border-color: transparent;
+    box-shadow: var(--shadow-glow);
+  }
+  .habit-mini .check {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    display: grid; place-items: center;
+    font-size: 12px;
+    flex-shrink: 0;
+    color: transparent;
+    background: rgba(255,255,255,0.05);
+  }
+  .habit-mini.done .check {
+    background: rgba(255,255,255,0.25);
+    border-color: rgba(255,255,255,0.4);
+    color: white;
+  }
+  .habit-mini .info { flex: 1; min-width: 0; }
+  .habit-mini .name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .habit-mini.done .name { color: white; }
+  .habit-mini .meta {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+    font-weight: 400;
+  }
+  .habit-mini.done .meta { color: rgba(255,255,255,0.85); }
+  .habit-mini .strk {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .habit-mini.done .strk { color: white; }
+  .habit-mini .del {
+    background: none; border: 0;
+    color: var(--muted);
+    font-size: 18px; cursor: pointer; padding: 0 4px;
+    opacity: 0.5;
+  }
+
+  /* === Bottom nav === */
+  .bottom {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    padding: 12px 20px max(12px, env(safe-area-inset-bottom));
+    z-index: 20;
+    display: flex; justify-content: center;
+  }
+  .nav {
+    width: 100%;
+    max-width: 440px;
+    display: flex;
+    justify-content: space-around;
+    padding: 8px;
+    background: rgba(15,12,29,0.85);
+    backdrop-filter: blur(30px);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .n-btn {
+    flex: 1;
+    background: none; border: 0;
+    color: var(--muted);
+    padding: 8px 4px;
+    border-radius: 100px;
+    cursor: pointer;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 2px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    transition: all 0.2s;
+  }
+  .n-btn .ic { font-size: 18px; }
+  .n-btn.active {
+    color: var(--primary);
+    background: var(--surface-2);
+  }
+
+  /* === Модалки === */
+  .modal-bg {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(8px);
+    z-index: 50;
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: var(--bg);
+    border-radius: 28px 28px 0 0;
+    width: 100%; max-width: 480px;
+    padding: 28px 24px;
+    max-height: 85vh;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-bottom: none;
+  }
+  .modal h3 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    background: var(--gradient-1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .modal .input {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 16px;
+    border-radius: 14px;
+    font-size: 15px;
+    margin-bottom: 16px;
+    outline: none;
+  }
+  .modal .input:focus { border-color: var(--primary); }
+  .modal .lbl {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+  }
+  .modal .emoji-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+  .modal .emoji-pick {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .modal .emoji-pick.active { background: var(--gradient-1); border-color: transparent; }
+  .modal .row { display: flex; gap: 8px; }
+  .modal .btn {
+    flex: 1; padding: 14px;
+    border: 0; border-radius: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .modal .btn-primary { background: var(--gradient-1); color: white; }
+  .modal .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+
+  /* === Палитра === */
+  .palette-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .pal-opt {
+    aspect-ratio: 1;
+    border-radius: 16px;
+    border: 3px solid transparent;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+  }
+  .pal-opt:active { transform: scale(0.95); }
+  .pal-opt.active { border-color: white; }
+  .pal-opt.active::after {
+    content: '✓';
+    position: absolute;
+    inset: 0;
+    display: grid; place-items: center;
+    color: white;
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  /* === Toast === */
+  .toast {
+    position: fixed;
+    bottom: 110px; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--gradient-1);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 100px;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.3s;
+    z-index: 99;
+    box-shadow: var(--shadow-glow);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* === Страницы === */
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .empty .em { font-size: 40px; display: block; margin-bottom: 12px; opacity: 0.4; }
+  .empty .txt { font-size: 13px; font-weight: 400; }
+  .page-title {
+    padding: 24px 0 16px;
+    font-size: 28px;
+    font-weight: 700;
+    background: var(--gradient-1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* === Диаграмма (Bar Chart) === */
+  .chart-card {
+    margin: 0 0 20px;
+    padding: 20px;
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    box-shadow: var(--shadow);
+  }
+  .chart-title {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  .chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 90px;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  .chart-bar {
+    width: 8px;
+    flex: 0 0 8px;
+    background: var(--gradient-1);
+    border-radius: 3px 3px 0 0;
+    transition: all 0.3s;
+    position: relative;
+    box-sizing: border-box;
+  }
+  .chart-bar.empty { background: var(--surface-2); }
+  .chart-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-size: 9px;
+    color: var(--muted);
+  }
+
+  /* === Donut для процентов === */
+  .donut-wrap {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 0 0 20px;
+    padding: 18px;
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+  }
+  .donut {
+    width: 80px; height: 80px;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .donut svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .donut .donut-text {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 20px;
+    font-weight: 700;
+    background: var(--gradient-1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .donut-info { flex: 1; }
+  .donut-info .lbl {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-weight: 600;
+  }
+  .donut-info .val {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+
+  /* === Календарь === */
+  .cal-wrap {
+    margin: 0 0 20px;
+    padding: 18px;
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    box-shadow: var(--shadow);
+  }
+  .cal-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
+  .cal-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-name {
+    text-align: center;
+    font-size: 9px;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 4px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .cal-day {
+    aspect-ratio: 1;
+    border-radius: 8px;
+    display: grid; place-items: center;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+    background: var(--surface-2);
+  }
+  .cal-day.done { background: var(--gradient-1); color: white; font-weight: 700; }
+  .cal-day.partial { background: var(--gradient-1); color: white; opacity: 0.5; }
+  .cal-day.today { box-shadow: 0 0 0 2px var(--text); }
+  .cal-day.future { opacity: 0.3; }
+
+  /* === Награды === */
+  .ach-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin: 0 0 20px;
+  }
+  .ach-tile {
+    aspect-ratio: 1;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 4px;
+    text-align: center;
+    box-shadow: var(--shadow);
+  }
+  .ach-tile.unlocked {
+    background: var(--gradient-1);
+    border-color: transparent;
+  }
+  .ach-tile .ach-icon {
+    font-size: 26px;
+    margin-bottom: 4px;
+  }
+  .ach-tile.locked .ach-icon { opacity: 0.25; }
+  .ach-tile .ach-name {
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .ach-tile.locked .ach-name { color: var(--muted); }
+  .ach-tile.unlocked .ach-name { color: white; }
+
+  /* === Челенджи === */
+  .ch-card {
+    margin: 0 0 10px;
+    padding: 18px;
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    box-shadow: var(--shadow);
+  }
+  .ch-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .ch-icon { font-size: 22px; }
+  .ch-info { flex: 1; min-width: 0; }
+  .ch-name { font-size: 14px; font-weight: 600; }
+  .ch-short {
+    font-size: 12px;
+    color: var(--primary);
+    font-weight: 500;
+    margin-top: 2px;
+  }
+  .ch-desc {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 300;
+    margin: 8px 0 12px;
+    line-height: 1.4;
+  }
+  .ch-badge {
+    font-size: 10px;
+    padding: 4px 10px;
+    border-radius: 100px;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .ch-badge.done { background: var(--gradient-1); color: white; }
+  .ch-bar { height: 4px; background: var(--surface-2); border-radius: 100px; overflow: hidden; margin-bottom: 8px; }
+  .ch-bar-fill { height: 100%; background: var(--gradient-1); border-radius: 100px; }
+  .ch-meta {
+    font-size: 11px;
+    color: var(--muted);
+    display: flex; justify-content: space-between;
+    font-weight: 400;
+  }
+  .ch-btn {
+    margin-top: 12px;
+    background: var(--gradient-1);
+    color: white;
+    border: 0;
+    padding: 12px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .ch-btn.secondary {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  /* === Loading === */
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    color: var(--muted);
+  }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div class="hello">
+      <div class="greeting" id="greeting">загрузка</div>
+      <div class="name" id="name">—</div>
+    </div>
+    <button class="icon-btn" id="settingsBtn">⚙</button>
+  </div>
+  <div id="content">
+    <div class="loading"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<!-- Add Modal -->
+<div class="modal-bg" id="addModal">
+  <div class="modal">
+    <h3>новая привычка</h3>
+    <input class="input" id="newName" placeholder="название" maxlength="60" />
+    <div class="lbl">иконка</div>
+    <div class="emoji-row" id="emojiRow"></div>
+    <div class="row">
+      <button class="btn btn-secondary" id="cancelAdd">отмена</button>
+      <button class="btn btn-primary" id="confirmAdd">добавить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-bg" id="settingsModal">
+  <div class="modal">
+    <h3>настройки</h3>
+    <div class="lbl">имя</div>
+    <input class="input" id="userName" placeholder="твоё имя" maxlength="40" style="margin-bottom:20px" />
+    <div class="lbl">напоминание</div>
+    <div id="reminderOpts" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:20px"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn btn-secondary" id="closeSettings">закрыть</button>
+      <button class="btn btn-primary" id="saveSettings">сохранить</button>
+    </div>
+  </div>
+</div>
+
+<nav class="bottom">
+  <div class="nav">
+    <button class="n-btn active" data-tab="home">
+      <span class="ic">⌂</span><span>дом</span>
+    </button>
+    <button class="n-btn" data-tab="stats">
+      <span class="ic">◐</span><span>стат</span>
+    </button>
+    <button class="n-btn" data-tab="achievement">
+      <span class="ic">✦</span><span>награды</span>
+    </button>
+    <button class="n-btn" data-tab="challenge">
+      <span class="ic">⌗</span><span>цели</span>
+    </button>
+    <button class="n-btn" data-tab="settings">
+      <span class="ic">⊕</span><span>ещё</span>
+    </button>
+  </div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+  const tg = window.Telegram?.WebApp;
+  if (tg) { try { tg.ready(); tg.expand(); } catch {} }
+
+  const state = {
+    tg_id: null,
+    user: null,
+    habits: [],
+    challengeCatalog: [],
+    myChallenges: [],
+    achievements: [],
+    palette: 'forest',
+    loaded: false,
+    refreshTimer: null,
+  };
+
+  const CHALLENGE_CATALOG = [
+    { id: 'water21', title: '21 день воды', emoji: '💧', shortDesc: 'Стакан воды утром и вечером', description: '21 день — привычка формируется. Стакан воды сразу после пробуждения и стакан перед сном.', days: 21, color: '#4a8fe7', habitName: 'Вода утро/вечер', habitEmoji: '💧' },
+    { id: 'walk21', title: '21 день прогулок', emoji: '🚶', shortDesc: '30 минут на воздухе', description: '21 день — формируем привычку. 30 минут прогулки на свежем воздухе.', days: 21, color: '#52b788', habitName: 'Прогулка 30 мин', habitEmoji: '🚶' },
+    { id: 'no_phone21', title: '21 день без телефона', emoji: '📵', shortDesc: 'Час без экрана до сна', description: '21 день без телефона за час до сна.', days: 21, color: '#6366f1', habitName: 'Без телефона вечером', habitEmoji: '📵' },
+    { id: 'meditate30', title: '30 дней тишины', emoji: '🧘', shortDesc: '10 минут медитации', description: '30 дней медитации по 10 минут утром.', days: 30, color: '#c060a1', habitName: 'Медитация 10 мин', habitEmoji: '🧘' },
+    { id: 'read30', title: '30 дней чтения', emoji: '📖', shortDesc: '20 минут книги', description: '30 дней по 20 минут чтения книги.', days: 30, color: '#ff8906', habitName: 'Чтение 20 мин', habitEmoji: '📖' },
+    { id: 'sport30', title: '30 дней спорта', emoji: '🏃', shortDesc: 'Активность 20 мин', description: '30 дней по 20 минут активности.', days: 30, color: '#38b000', habitName: 'Спорт 20 мин', habitEmoji: '🏃' },
+    { id: 'early30', title: '30 дней ранних подъёмов', emoji: '🌅', shortDesc: 'Вставать в 6:00–7:00', description: '30 дней вставать в 6:00–7:00 без snooze.', days: 30, color: '#f59e0b', habitName: 'Подъём в 6–7', habitEmoji: '🌅' },
+    { id: 'sport50', title: '50 дней силы', emoji: '💪', shortDesc: 'Спорт 30 мин через день', description: '50 дней тренировок через день.', days: 50, color: '#2e7d32', habitName: 'Спорт 30 мин', habitEmoji: '💪' },
+    { id: 'water50', title: '50 дней гидратации', emoji: '💧', shortDesc: '2 литра воды в день', description: '50 дней по 2 литра воды.', days: 50, color: '#1976d2', habitName: '2 литра воды', habitEmoji: '💧' },
+    { id: 'sport75', title: '75 дней силы', emoji: '💪', shortDesc: 'Спорт каждые 2 дня', description: '75 дней. Тренировка через день.', days: 75, color: '#38b000', habitName: 'Спорт 40 мин', habitEmoji: '🏃' },
+    { id: 'sleep75', title: '75 дней сна', emoji: '😴', shortDesc: 'Ложиться до 23:00', description: '75 дней. Сон до 23:00.', days: 75, color: '#7f5af0', habitName: 'Сон до 23', habitEmoji: '😴' },
+    { id: 'nofap75', title: '75 дней без', emoji: '🚫', shortDesc: 'Отказ от вредной привычки', description: '75 дней без вредной привычки.', days: 75, color: '#e63946', habitName: 'Без вредного', habitEmoji: '🚫' },
+    { id: 'read75', title: '75 дней чтения', emoji: '📖', shortDesc: '30 минут книги ежедневно', description: '75 дней по 30 минут книги.', days: 75, color: '#ff8906', habitName: 'Чтение 30 мин', habitEmoji: '📖' },
+    { id: 'meditate75', title: '75 дней тишины', emoji: '🧘', shortDesc: '20 минут медитации', description: '75 дней медитации.', days: 75, color: '#c060a1', habitName: 'Медитация 20 мин', habitEmoji: '🧘' },
+    { id: 'walk75', title: '75 дней шагов', emoji: '🚶', shortDesc: '10 000 шагов ежедневно', description: '75 дней по 10 000 шагов.', days: 75, color: '#2cb1bc', habitName: '10 000 шагов', habitEmoji: '🚶' },
+    { id: 'sport100', title: '100 дней трансформации', emoji: '🏆', shortDesc: 'Спорт каждый день', description: '100 дней — тренировка КАЖДЫЙ день.', days: 100, color: '#d97706', habitName: 'Спорт каждый день', habitEmoji: '🏆' },
+    { id: 'mind100', title: '100 дней ясности', emoji: '🧠', shortDesc: 'Медитация + дневник', description: '100 дней ментальной практики.', days: 100, color: '#7c3aed', selectable: true, habits: [{ name: 'Медитация 15 мин', emoji: '🧘' }, { name: 'Дневник мыслей', emoji: '📓' }] },
+    { id: 'clean100', title: '100 дней чистоты', emoji: '✨', shortDesc: 'Без сахара и фастфуда', description: '100 дней без сахара.', days: 100, color: '#16a34a', habitName: 'Без сахара', habitEmoji: '✨' },
+    { id: 'year_walk', title: '365 дней шагов', emoji: '🚶‍♀️', shortDesc: '10 000 шагов весь год', description: '365 дней по 10 000 шагов.', days: 365, color: '#0d9488', habitName: '10 000 шагов', habitEmoji: '🚶‍♀️' },
+    { id: 'year_read', title: '365 дней книголюба', emoji: '📚', shortDesc: '20 минут чтения весь год', description: '365 дней чтения по 20 минут.', days: 365, color: '#ea580c', habitName: 'Чтение 20 мин', habitEmoji: '📚' },
+    { id: 'work_eff', title: 'Челлендж эффективной работы', emoji: '💼', shortDesc: '4 привычки для продуктивности', description: 'Полный арсенал продуктивного человека.', days: 30, color: '#0ea5e9', selectable: true, habits: [{ name: 'Фокус-старт', emoji: '🎯' }, { name: 'Главная задача дня', emoji: '✓' }, { name: 'Блок 50 мин без отвлечений', emoji: '🔕' }, { name: 'Вечерняя ревизия', emoji: '📝' }] },
+    { id: 'work_deep', title: '30 дней глубокой работы', emoji: '🧠', shortDesc: '2 часа фокуса ежедневно', description: '30 дней по 2 часа глубокой работы.', days: 30, color: '#0891b2', selectable: true, habits: [{ name: '2 часа глубокой работы', emoji: '🧠' }, { name: 'Без соцсетей в рабочие часы', emoji: '📵' }, { name: 'План на день утром', emoji: '📋' }] },
+    { id: 'work_morning', title: 'Утренняя рутина', emoji: '☀️', shortDesc: 'Идеальное утро', description: '30 дней утренней рутины.', days: 30, color: '#fbbf24', selectable: true, habits: [{ name: 'Подъём в 6:00', emoji: '🌅' }, { name: 'Стакан воды сразу', emoji: '💧' }, { name: '10 минут тишины', emoji: '🧘' }, { name: 'Главная задача до 9:00', emoji: '🎯' }] },
+  ];
+
+  const EMOJIS = ['💧','🏃','📖','🧘','😴','🚶','📵','🎓','🥗','✍️','💪','🎯','🧠','☕','📝','🎨','🌅','🌙','🌱','☀️','🎵','🍎'];
+  const REMINDERS = [
+    { value: '08:00', label: '08:00' },
+    { value: '13:00', label: '13:00' },
+    { value: '19:00', label: '19:00' },
+    { value: '22:00', label: '22:00' },
+    { value: 'off', label: 'без' },
+  ];
+  // Только одна палитра — зелёный лес
+  const PALETTES = [
+    { id: 'forest', colors: ['#5fb357','#2cb67d'] },
+  ];
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // === POST /api/action — реальная синхронизация с ботом ===
+  const API_BASE = 'https://habit-tracker-bot-v51n.onrender.com';
+  async function sendAction(type, payload = {}) {
+    if (!state.tg_id) return { ok: false, error: 'no tg_id' };
+    try {
+      const r = await fetch(`${API_BASE}/api/action`, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, tg_id: state.tg_id, ...payload })
+      });
+      const data = await r.json();
+      // Сбросить ETag и хеш — данные изменились
+      lastETag = null;
+      lastDataHash = null;
+      // Мгновенный refresh
+      await refreshDataSmart();
+      return data;
+    } catch (e) {
+      console.error('sendAction error:', e);
+      return { ok: false, error: e.message };
+    }
+  }
+
+  // ===== Tree =====
+  function getTreeSVG(streak) {
+    if (streak >= 100) return `<ellipse cx="50" cy="105" rx="30" ry="3" fill="#000" opacity="0.15"/>
+      <rect x="48" y="65" width="4" height="40" fill="#6b4423"/>
+      <ellipse cx="50" cy="50" rx="32" ry="28" fill="#3a9c2e"/>
+      <ellipse cx="30" cy="58" rx="20" ry="18" fill="#5fb357"/>
+      <ellipse cx="70" cy="58" rx="20" ry="18" fill="#5fb357"/>
+      <ellipse cx="50" cy="28" rx="18" ry="16" fill="#7ac96b"/>
+      <circle cx="38" cy="42" r="3" fill="#ff6b8b"/>
+      <circle cx="55" cy="35" r="3" fill="#ffd803"/>
+      <circle cx="65" cy="50" r="3" fill="#ff6b8b"/>`;
+    if (streak >= 30) return `<ellipse cx="50" cy="105" rx="26" ry="2" fill="#000" opacity="0.15"/>
+      <rect x="48" y="68" width="4" height="37" fill="#6b4423"/>
+      <ellipse cx="50" cy="55" rx="26" ry="22" fill="#3a9c2e"/>
+      <ellipse cx="34" cy="62" rx="16" ry="14" fill="#5fb357"/>
+      <ellipse cx="66" cy="62" rx="16" ry="14" fill="#5fb357"/>`;
+    if (streak >= 7) return `<ellipse cx="50" cy="105" rx="20" ry="2" fill="#000" opacity="0.15"/>
+      <rect x="48" y="80" width="4" height="25" fill="#6b4423"/>
+      <ellipse cx="50" cy="75" rx="18" ry="16" fill="#3a9c2e"/>
+      <ellipse cx="40" cy="80" rx="11" ry="10" fill="#5fb357"/>
+      <ellipse cx="60" cy="80" rx="11" ry="10" fill="#5fb357"/>`;
+    if (streak >= 3) return `<rect x="49" y="90" width="3" height="15" fill="#5fb357"/>
+      <ellipse cx="44" cy="86" rx="6" ry="4" fill="#7ac96b" transform="rotate(-30 44 86)"/>
+      <ellipse cx="56" cy="82" rx="6" ry="4" fill="#5fb357" transform="rotate(30 56 82)"/>`;
+    return `<ellipse cx="50" cy="106" rx="8" ry="2" fill="#000" opacity="0.15"/>
+      <ellipse cx="50" cy="100" rx="5" ry="6" fill="#6b4423"/>`;
+  }
+  function getTreeLabel(streak) {
+    if (streak >= 100) return '✨ сказочное';
+    if (streak >= 30) return '🌳 большое';
+    if (streak >= 14) return '🌲 молодое';
+    if (streak >= 7) return '🌿 кустик';
+    if (streak >= 3) return '🌱 росток';
+    return '🌰 семечко';
+  }
+  function getMaxStreak() {
+    return Math.max(0, ...state.habits.map(h => h.streak || 0), state.user?.best_streak || 0);
+  }
+
+  // ===== Helpers =====
+  function isHabitDoneToday(h) {
+    const today = new Date().toISOString().slice(0,10);
+    if (h.doneDays && h.doneDays.length) return h.doneDays.includes(today);
+    if (h.last30 && h.last30.length) {
+      const last = h.last30[h.last30.length - 1];
+      return last?.day === today && last?.done;
+    }
+    return false;
+  }
+  function setHabitDoneToday(h, done) {
+    const today = new Date().toISOString().slice(0,10);
+    if (!h.doneDays) h.doneDays = [];
+    const idx = h.doneDays.indexOf(today);
+    if (done && idx === -1) h.doneDays.push(today);
+    else if (!done && idx !== -1) h.doneDays.splice(idx, 1);
+  }
+
+  // ===== Главная =====
+  function renderHome() {
+    const c = document.getElementById('content');
+    recalcHabitStats(); // Пересчитываем перед рендером
+    const hour = new Date().getHours();
+    let g = 'доброе утро';
+    if (hour >= 12 && hour < 18) g = 'добрый день';
+    else if (hour >= 18 && hour < 22) g = 'добрый вечер';
+    else g = 'доброй ночи';
+    document.getElementById('greeting').textContent = g;
+    const name = state.user?.name || 'Друг';
+    document.getElementById('name').textContent = name;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const doneToday = state.habits.filter(h => isHabitDoneToday(h)).length;
+    const total = state.habits.length;
+    const best = state.user?.best_streak || 0;
+    const streak = getMaxStreak();
+
+    let html = `
+      <div class="hero">
+        <div class="hero-tree">
+          <svg class="tree-svg" viewBox="0 0 100 110">
+            <g>${getTreeSVG(streak)}</g>
+          </svg>
+        </div>
+        <div class="tree-label">${getTreeLabel(streak)}</div>
+        <div class="tree-streak">лучшая серия · <b>${best}</b> ${best === 1 ? 'день' : best < 5 ? 'дня' : 'дней'}</div>
+      </div>
+
+      <div class="mini-card" id="openFullApp">
+        <div class="mini-icon">✓</div>
+        <div class="mini-info">
+          <div class="mini-label">сегодня</div>
+          <div class="mini-title">${doneToday} из ${total}</div>
+          <div class="mini-sub">нажми чтобы отметить</div>
+        </div>
+        <div class="arrow">→</div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="v">${doneToday}/${total}</div><div class="l">сегодня</div></div>
+        <div class="stat"><div class="v">${state.user?.total_checks || 0}</div><div class="l">отметок</div></div>
+        <div class="stat"><div class="v">${best}</div><div class="l">рекорд</div></div>
+      </div>
+
+      <div class="section-head">
+        <h2>привычки</h2>
+        <button class="add" id="addHabitBtn">+ добавить</button>
+      </div>
+    `;
+
+    if (total === 0) {
+      html += '<div class="empty"><span class="em">🌱</span><div class="txt">начни с первой привычки</div></div>';
+    } else {
+      const top = state.habits.slice(0, 5);
+      top.forEach(h => {
+        const isDone = isHabitDoneToday(h);
+        const emoji = h.emoji || '📌';
+        html += `
+          <div class="habit-mini ${isDone ? 'done' : ''}" data-id="${h.id}">
+            <div class="check">${isDone ? '✓' : ''}</div>
+            <div class="emoji" style="font-size:24px;line-height:1;margin-right:8px;flex-shrink:0">${emoji}</div>
+            <div class="info">
+              <div class="name">${escapeHtml(h.name)}</div>
+              <div class="meta">${h.percent30 || 0}% · ${h.totalChecks || 0} отметок</div>
+            </div>
+            <div class="strk">${h.streak || 0}д</div>
+          </div>
+        `;
+      });
+      if (total > 5) {
+        html += `<button class="add" id="showAll" style="display:block;margin:12px auto 0;padding:10px 20px;background:var(--surface);border:1px solid var(--border);border-radius:100px">все ${total} →</button>`;
+      }
+    }
+
+    c.innerHTML = html;
+    document.getElementById('addHabitBtn').onclick = openAddModal;
+    const showAll = document.getElementById('showAll');
+    if (showAll) showAll.onclick = renderAllHabits;
+    document.querySelectorAll('.habit-mini').forEach(el => {
+      el.onclick = async () => {
+        const id = el.dataset.id;
+        const h = state.habits.find(x => x.id === id);
+        if (!h) return;
+        const wasDone = isHabitDoneToday(h);
+        setHabitDoneToday(h, !wasDone);
+        h.streak = !wasDone ? (h.streak || 0) + 1 : Math.max(0, (h.streak || 0) - 1);
+        h.totalChecks = (h.totalChecks || 0) + (!wasDone ? 1 : -1);
+        renderHome();
+        sendAction('toggle_habit', { habit_id: h.id });
+        // Подтянуть свежие данные с сервера
+        setTimeout(refreshData, 800);
+      };
+    });
+    const mini = document.getElementById('openFullApp');
+    if (mini) mini.onclick = renderAllHabits;
+  }
+
+  function renderAllHabits() {
+    const c = document.getElementById('content');
+    const today = new Date().toISOString().slice(0, 10);
+    let html = `<div class="page-title">все привычки</div>`;
+    state.habits.forEach(h => {
+      const isDone = isHabitDoneToday(h);
+      const emoji = h.emoji || '📌';
+      html += `
+        <div class="habit-mini ${isDone ? 'done' : ''}" data-id="${h.id}">
+          <div class="check">${isDone ? '✓' : ''}</div>
+          <div class="emoji" style="font-size:24px;line-height:1;margin-right:8px;flex-shrink:0">${emoji}</div>
+          <div class="info">
+            <div class="name">${escapeHtml(h.name)}</div>
+            <div class="meta">${h.percent30 || 0}% · ${h.streak || 0}д</div>
+          </div>
+          <button class="del" data-del="${h.id}">×</button>
+        </div>
+      `;
+    });
+    html += `<button class="add" id="backHome" style="display:block;margin:16px auto 0;padding:12px 24px;background:var(--gradient-1);color:white;border:0;border-radius:100px;font-weight:600">← на главную</button>`;
+    c.innerHTML = html;
+    document.querySelectorAll('.habit-mini').forEach(el => {
+      const delBtn = el.querySelector('.del');
+      if (delBtn) {
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          const habit = state.habits.find(x => x.id === el.dataset.id);
+          if (!habit) return;
+          if (!delBtn._confirm) {
+            delBtn._confirm = true;
+            delBtn.textContent = '✓';
+            delBtn.style.color = 'var(--primary)';
+            delBtn.style.opacity = '1';
+            toast('нажми ещё раз для удаления');
+            setTimeout(() => {
+              if (delBtn._confirm) {
+                delBtn._confirm = false;
+                delBtn.textContent = '×';
+                delBtn.style.color = '';
+                delBtn.style.opacity = '';
+              }
+            }, 3000);
+            return;
+          }
+          const id = el.dataset.id;
+          state.habits = state.habits.filter(x => x.id !== id);
+          sendAction('delete_habit', { habit_id: id });
+          renderAllHabits();
+          toast('удалено');
+          setTimeout(refreshData, 500);
+        };
+        return;
+      }
+      el.onclick = () => {
+        const id = el.dataset.id;
+        const h = state.habits.find(x => x.id === id);
+        if (!h) return;
+        const wasDone = isHabitDoneToday(h);
+        setHabitDoneToday(h, !wasDone);
+        h.streak = !wasDone ? (h.streak || 0) + 1 : Math.max(0, (h.streak || 0) - 1);
+        renderAllHabits();
+        sendAction('toggle_habit', { habit_id: h.id });
+      };
+    });
+    const back = document.getElementById('backHome');
+    if (back) back.onclick = renderHome;
+  }
+
+  // ===== Стат + Календарь + Диаграмма =====
+  // Пересчёт статистики по текущим данным
+  function recalcHabitStats() {
+    const todayD = new Date();
+    const todayKey = `${todayD.getFullYear()}-${String(todayD.getMonth()+1).padStart(2,'0')}-${String(todayD.getDate()).padStart(2,'0')}`;
+    for (const h of state.habits) {
+      const done = h.doneDays || [];
+      h.totalChecks = done.length;
+      // Считаем процент за последние 30 дней
+      let recent = 0;
+      for (let i = 0; i < 30; i++) {
+        const d = new Date(todayD);
+        d.setDate(d.getDate() - i);
+        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        if (done.includes(k)) recent++;
+      }
+      h.percent30 = Math.round(recent / 30 * 100);
+      h.todayDone = done.includes(todayKey);
+      // Streak
+      let streak = 0;
+      for (let i = 0; i < 365; i++) {
+        const d = new Date(todayD);
+        d.setDate(d.getDate() - i);
+        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        if (done.includes(k)) streak++; else break;
+      }
+      h.streak = streak;
+    }
+    // Обновляем user.total_checks
+    if (state.user) {
+      state.user.total_checks = state.habits.reduce((s, h) => s + (h.totalChecks || 0), 0);
+      let best = 0;
+      for (const h of state.habits) {
+        if ((h.streak || 0) > best) best = h.streak;
+      }
+      if ((state.user.best_streak || 0) < best) state.user.best_streak = best;
+    }
+  }
+
+  function renderStats() {
+    const c = document.getElementById('content');
+    recalcHabitStats(); // Пересчитываем перед рендером
+    const total = state.user?.total_checks || 0;
+    const best = state.user?.best_streak || 0;
+    const avgPct = state.habits.length ? Math.round(state.habits.reduce((s, h) => s + (h.percent30 || 0), 0) / state.habits.length) : 0;
+    const totalHabits = state.habits.length;
+
+    // Donut (средний процент)
+    const donutCircum = 2 * Math.PI * 32;
+    const donutOffset = donutCircum * (1 - avgPct / 100);
+    let html = `<div class="page-title">статистика</div>`;
+
+    // Donut card
+    html += `
+      <div class="donut-wrap">
+        <div class="donut">
+          <svg viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="8"/>
+            <circle cx="40" cy="40" r="32" fill="none" stroke="url(#grad)" stroke-width="8" stroke-linecap="round"
+              stroke-dasharray="${donutCircum}" stroke-dashoffset="${donutOffset}"/>
+            <defs>
+              <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#5fb357"/>
+                <stop offset="100%" stop-color="#2cb67d"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <div class="donut-text">${avgPct}%</div>
+        </div>
+        <div class="donut-info">
+          <div class="lbl">среднее за 30 дней</div>
+          <div class="val">${total} отметок</div>
+          <div class="lbl" style="margin-top:6px">🔥 ${best} дней рекорд</div>
+        </div>
+      </div>
+    `;
+
+    // Bar Chart 30 дней
+    const days = 30;
+    const todayD = new Date();
+    const dayMap = {};
+    state.habits.forEach(h => {
+      (h.doneDays || []).forEach(d => { dayMap[d] = (dayMap[d] || 0) + 1; });
+    });
+    let barsHtml = '<div class="chart">';
+    let labelsHtml = '<div class="chart-labels"><span>30д</span><span>20д</span><span>10д</span><span>сегодня</span></div>';
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(todayD);
+      d.setDate(d.getDate() - i);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const count = dayMap[key] || 0;
+      const height = totalHabits ? Math.max(4, Math.min(100, (count / totalHabits) * 100)) : 4;
+      const isToday = i === 0;
+      barsHtml += `<div class="chart-bar ${count === 0 ? 'empty' : ''}" style="width:8px;height:${height}%;${isToday ? 'box-shadow: 0 0 8px var(--primary-glow);' : ''}" title="${key}: ${count}/${totalHabits}"></div>`;
+    }
+    barsHtml += '</div>';
+    html += `<div class="chart-card"><div class="chart-title">30 дней активности</div>${barsHtml}${labelsHtml}</div>`;
+
+    // Календарь
+    const year = todayD.getFullYear();
+    const month = todayD.getMonth();
+    const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    const dayNames = ['пн','вт','ср','чт','пт','сб','вс'];
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startOffset = (firstDay.getDay() + 6) % 7;
+    const totalDays = lastDay.getDate();
+    let calHtml = '<div class="cal-grid">';
+    dayNames.forEach(d => calHtml += `<div class="cal-name">${d}</div>`);
+    for (let i = 0; i < startOffset; i++) calHtml += '<div></div>';
+    for (let d = 1; d <= totalDays; d++) {
+      const dateObj = new Date(year, month, d);
+      const dk = `${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(dateObj.getDate()).padStart(2,'0')}`;
+      const isToday = todayD.getFullYear() === year && todayD.getMonth() === month && todayD.getDate() === d;
+      const isFuture = dateObj > todayD;
+      const count = dayMap[dk] || 0;
+      let cls = 'cal-day';
+      if (isToday) cls += ' today';
+      if (isFuture) cls += ' future';
+      if (count === totalHabits && count > 0) cls += ' done';
+      else if (count > 0) cls += ' partial';
+      calHtml += `<div class="${cls}">${d}</div>`;
+    }
+    calHtml += '</div>';
+    html += `<div class="cal-wrap"><div class="cal-head"><div class="cal-title">${monthNames[month]} ${year}</div></div>${calHtml}</div>`;
+
+    // Список привычек
+    if (state.habits.length > 0) {
+      html += '<div class="section-head"><h2>по привычкам</h2></div>';
+      state.habits.forEach(h => {
+        const pct = h.percent30 || 0;
+        html += `
+          <div class="habit-mini" style="cursor:default">
+            <div class="check">${h.emoji || '✦'}</div>
+            <div class="info">
+              <div class="name">${escapeHtml(h.name)}</div>
+              <div class="meta">${h.totalChecks || 0} ✓ · ${h.best || 0} 🔥</div>
+            </div>
+            <div class="strk">${pct}%</div>
+          </div>
+        `;
+      });
+    } else {
+      html += '<div class="empty"><span class="em">◐</span><div class="txt">нет привычек</div></div>';
+    }
+
+    c.innerHTML = html;
+  }
+
+  // ===== Награды =====
+  function renderAchievement() {
+    const c = document.getElementById('content');
+    const ach = state.achievements || [];
+    const unlocked = new Set(ach.map(a => a.code));
+    const all = [
+      { code: 'first_check',  icon: '✦', name: 'Первый шаг' },
+      { code: 'streak_3',     icon: '◇', name: '3 дня' },
+      { code: 'streak_7',     icon: '◈', name: 'Неделя' },
+      { code: 'streak_14',    icon: '○', name: '2 недели' },
+      { code: 'streak_30',    icon: '◉', name: 'Месяц' },
+      { code: 'streak_100',   icon: '★', name: '100 дней' },
+      { code: 'streak_365',   icon: '✺', name: 'Год' },
+      { code: 'level_5',      icon: '◐', name: 'Уровень 5' },
+      { code: 'level_10',     icon: '◑', name: 'Уровень 10' },
+      { code: 'level_25',     icon: '◓', name: 'Уровень 25' },
+      { code: 'early_bird',   icon: '☀', name: 'Утро' },
+      { code: 'night_owl',    icon: '☾', name: 'Ночь' },
+      { code: 'note_keeper',  icon: '✎', name: 'Заметки' },
+      { code: 'thankful',     icon: '♡', name: 'Благодарность' },
+      { code: 'goal_setter',  icon: '◬', name: 'Цель' },
+      { code: 'pomodoro_master', icon: '◔', name: 'Фокус' },
+    ];
+    const total = all.length;
+    const got = all.filter(a => unlocked.has(a.code)).length;
+
+    let html = `
+      <div class="page-title">награды</div>
+      <div class="donut-wrap">
+        <div class="donut">
+          <svg viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="8"/>
+            <circle cx="40" cy="40" r="32" fill="none" stroke="url(#grad2)" stroke-width="8" stroke-linecap="round"
+              stroke-dasharray="${2 * Math.PI * 32}" stroke-dashoffset="${2 * Math.PI * 32 * (1 - (total ? got/total : 0))}"/>
+            <defs>
+              <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#5fb357"/>
+                <stop offset="100%" stop-color="#4ecdc4"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <div class="donut-text">${total ? Math.round(got/total*100) : 0}%</div>
+        </div>
+        <div class="donut-info">
+          <div class="lbl">прогресс</div>
+          <div class="val">${got} из ${total}</div>
+          <div class="lbl" style="margin-top:6px">открыто</div>
+        </div>
+      </div>
+      <div class="ach-grid">
+    `;
+    all.forEach(a => {
+      const have = unlocked.has(a.code);
+      html += `
+        <div class="ach-tile ${have ? 'unlocked' : 'locked'}">
+          <div class="ach-icon">${have ? a.icon : '·'}</div>
+          <div class="ach-name">${have ? a.name : '???'}</div>
+        </div>
+      `;
+    });
+    html += '</div>';
+    c.innerHTML = html;
+  }
+
+  // ===== Челленджи =====
+  function renderChallenge() {
+    const c = document.getElementById('content');
+    const catalog = state.challengeCatalog || [];
+    const myCh = state.myChallenges || [];
+    let html = '<div class="page-title">челленджи</div>';
+
+    if (myCh.length > 0) {
+      html += '<div class="section-head"><h2>мои</h2></div>';
+      myCh.forEach(c => {
+        const pct = Math.min(100, Math.round((c.checkDays || 0) / c.days * 100));
+        const done = c.completed;
+        const restDays = c.days - (c.checkDays || 0);
+        html += `
+          <div class="ch-card">
+            <div class="ch-head">
+              <div class="ch-icon">${c.emoji || '⌗'}</div>
+              <div class="ch-info">
+                <div class="ch-name">${escapeHtml(c.title)}</div>
+                ${c.description ? `<div class="ch-desc">${escapeHtml(c.description)}</div>` : ''}
+              </div>
+              <div class="ch-badge ${done ? 'done' : ''}">${done ? 'готово' : c.days + 'д'}</div>
+            </div>
+            <div class="ch-bar"><div class="ch-bar-fill" style="width:${pct}%"></div></div>
+            <div class="ch-meta">
+              <span>${c.checkDays || 0}/${c.days} ${done ? 'дней пройдено' : 'осталось ' + restDays}</span>
+              <span>${pct}%</span>
+            </div>
+            ${!done ? `<button class="ch-btn" data-cid="${c.id}">отметить сегодня</button>` : ''}
+          </div>
+        `;
+      });
+    }
+
+    if (catalog.length > 0) {
+      html += '<div class="section-head" style="margin-top:20px"><h2>доступные</h2></div>';
+      const myTitles = new Set(myCh.map(c => c.title));
+      const available = catalog.filter(c => !myTitles.has(c.title));
+      if (available.length === 0) {
+        html += '<div class="empty"><span class="em">⌗</span><div class="txt">все челленджи уже начаты</div></div>';
+      } else {
+        available.forEach(c => {
+          const habits = c.habits || (c.habitName ? [{ name: c.habitName, emoji: c.habitEmoji }] : []);
+          let habitsHtml = '';
+          if (habits.length > 0) {
+            habitsHtml = '<div style="margin:10px 0;padding:10px 12px;background:var(--surface-2);border-radius:10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.15em;margin-bottom:6px;font-weight:600">' + (c.selectable ? 'выбери привычки' : 'добавится привычка') + '</div>';
+            habits.forEach((h, i) => {
+              habitsHtml += `<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span style="font-size:16px">${h.emoji}</span><span style="flex:1;font-size:12px;color:var(--text)">${escapeHtml(h.name)}</span></div>`;
+            });
+            habitsHtml += '</div>';
+          }
+          html += `
+            <div class="ch-card">
+              <div class="ch-head">
+                <div class="ch-icon">${c.emoji || '⌗'}</div>
+                <div class="ch-info">
+                  <div class="ch-name">${escapeHtml(c.title)}</div>
+                  <div class="ch-short">${escapeHtml(c.shortDesc || '')}</div>
+                </div>
+                <div class="ch-badge">${c.days}д</div>
+              </div>
+              <div class="ch-desc">${escapeHtml(c.description || c.desc || '')}</div>
+              ${habitsHtml}
+              <button class="ch-btn" data-start="${c.id}">${c.selectable ? 'выбрать привычки и начать' : 'начать челлендж'}</button>
+            </div>
+          `;
+        });
+      }
+    }
+    c.innerHTML = html;
+    c.querySelectorAll('[data-cid]').forEach(b => b.onclick = async () => {
+      const cid = b.dataset.cid;
+      const ch = state.myChallenges.find(c => c.id === cid);
+      if (ch) {
+        ch.checkDays = (ch.checkDays || 0) + 1;
+        if (ch.checkDays >= ch.days) ch.completed = 1;
+      }
+      sendAction('check_challenge', { challenge_id: cid });
+      toast('день отмечен ✓');
+      await refreshData();
+      renderChallenge();
+    });
+    c.querySelectorAll('[data-start]').forEach(b => b.onclick = async () => {
+      const cid = b.dataset.start;
+      const cat = state.challengeCatalog.find(c => c.id === cid);
+      if (cat) {
+        // Локально создаём челлендж
+        const newCh = {
+          id: 'tmp_ch_' + Date.now(),
+          title: cat.title, emoji: cat.emoji, description: cat.description || cat.desc,
+          days: cat.days, color: cat.color, completed: 0, checkDays: 0,
+        };
+        state.myChallenges.push(newCh);
+        // Локально создаём привычки из челленджа
+        if (cat.habits && cat.habits.length) {
+          for (const h of cat.habits) {
+            state.habits.push({
+              id: 'tmp_h_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+              name: h.name, emoji: h.emoji, streak: 0, doneDays: [],
+              totalChecks: 0, percent30: 0, color: cat.color,
+            });
+          }
+        } else if (cat.habitName) {
+          state.habits.push({
+            id: 'tmp_h_' + Date.now(),
+            name: cat.habitName, emoji: cat.habitEmoji, streak: 0, doneDays: [],
+            totalChecks: 0, percent30: 0, color: cat.color,
+          });
+        }
+      }
+      sendAction('start_challenge', { challenge_id: cid });
+      toast('🚀 челлендж начат!');
+      await refreshData();
+      renderChallenge();
+    });
+  }
+
+  // ===== Tabs =====
+  async function switchTab(tab, btn) {
+    document.querySelectorAll('.n-btn').forEach(b => b.classList.toggle('active', b === btn));
+    // Сначала подтягиваем свежие данные
+    await refreshData();
+    if (tab === 'home') renderHome();
+    else if (tab === 'stats') renderStats();
+    else if (tab === 'achievement') renderAchievement();
+    else if (tab === 'challenge') renderChallenge();
+    else if (tab === 'settings') openSettings();
+  }
+  document.querySelectorAll('.n-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab, btn));
+  });
+
+  // ===== Add modal =====
+  let newEmoji = '💧';
+  function openAddModal() {
+    document.getElementById('newName').value = '';
+    newEmoji = '💧';
+    renderEmojiRow();
+    document.getElementById('addModal').classList.add('show');
+    setTimeout(() => document.getElementById('newName').focus(), 100);
+  }
+  function closeAddModal() { document.getElementById('addModal').classList.remove('show'); }
+  function renderEmojiRow() {
+    const row = document.getElementById('emojiRow');
+    row.innerHTML = '';
+    EMOJIS.forEach(em => {
+      const b = document.createElement('button');
+      b.className = 'emoji-pick' + (em === newEmoji ? ' active' : '');
+      b.textContent = em;
+      b.onclick = () => { newEmoji = em; renderEmojiRow(); };
+      row.appendChild(b);
+    });
+  }
+  document.getElementById('cancelAdd').addEventListener('click', closeAddModal);
+  document.getElementById('confirmAdd').addEventListener('click', () => {
+    const name = document.getElementById('newName').value.trim();
+    if (!name) { toast('введи название'); return; }
+    if (name.length > 60) { toast('слишком длинное'); return; }
+    // Проверка лимита
+    if (state.habits.length >= 30) { toast('лимит 30 привычек'); closeAddModal(); return; }
+    sendAction('add_habit', { name, emoji: newEmoji });
+    state.habits.push({ id: 'tmp_' + Date.now(), name, emoji: newEmoji, streak: 0, doneDays: [], totalChecks: 0, percent30: 0 });
+    closeAddModal();
+    renderHome();
+    toast('✓ добавлено');
+    setTimeout(refreshData, 1000);
+  });
+
+  // ===== Settings =====
+  function openSettings() {
+    document.getElementById('settingsBtn').click();
+  }
+  document.getElementById('settingsBtn').addEventListener('click', () => {
+    document.getElementById('userName').value = state.user?.name || '';
+    const grid = document.getElementById('reminderOpts');
+    grid.innerHTML = '';
+    REMINDERS.forEach(r => {
+      const b = document.createElement('button');
+      b.className = 'emoji-pick';
+      b.style.fontSize = '13px';
+      b.style.padding = '14px';
+      b.textContent = r.label;
+      if (state.user?.reminder_time === r.value) {
+        b.style.background = 'var(--gradient-1)';
+        b.style.color = 'white';
+        b.style.borderColor = 'transparent';
+      }
+      b.onclick = () => { state.user.reminder_time = r.value; openSettings(); };
+      grid.appendChild(b);
+    });
+    document.getElementById('settingsModal').classList.add('show');
+  });
+  document.getElementById('closeSettings').addEventListener('click', () => document.getElementById('settingsModal').classList.remove('show'));
+  document.getElementById('saveSettings').addEventListener('click', () => {
+    const name = document.getElementById('userName').value.trim();
+    const remTime = state.user?.reminder_time || '08:00';
+    if (name) {
+      state.user.name = name;
+      sendAction('set_profile', { name, reminder_time: remTime });
+    } else {
+      sendAction('set_reminder', { reminder_time: remTime });
+    }
+    document.getElementById('settingsModal').classList.remove('show');
+    renderHome();
+    toast('сохранено ✓');
+  });
+
+  // ===== Toast =====
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._t);
+    t._t = setTimeout(() => t.classList.remove('show'), 1800);
+  }
+
+  // ===== Data Loading =====
+  function loadFromURL() {
+    const params = new URLSearchParams(location.search);
+    const tgId = params.get('tg_id');
+    if (!tgId) return false;
+    state.tg_id = parseInt(tgId);
+    state.demo = params.get('demo') === '1';
+    // Если данные пришли в URL — применим сразу как первичные
+    const dataRaw = params.get('data');
+    if (dataRaw) {
+      try {
+        const data = JSON.parse(decodeURIComponent(dataRaw));
+        if (data.user) state.user = { ...state.user, ...data.user };
+        if (data.habits) state.habits = data.habits;
+        if (data.challenges) state.myChallenges = data.challenges;
+        if (data.achievements) state.achievements = data.achievements;
+        if (data.challengeCatalog) state.challengeCatalog = data.challengeCatalog;
+        if (data.user?.palette) {
+          state.palette = data.user.palette;
+          document.documentElement.setAttribute('data-palette', state.palette);
+        }
+        recalcHabitStats();
+      } catch (e) {}
+    }
+    return true;
+  }
+
+  // Демо-данные с прокачкой
+  function getDemoData() {
+    const todayD = new Date();
+    const mk = (offset) => {
+      const d = new Date(todayD);
+      d.setDate(d.getDate() - offset);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    };
+    // 100 дней подряд для первой привычки
+    const d100 = Array.from({length: 100}, (_, i) => mk(i));
+    // 67 дней — у беговой
+    const d67 = Array.from({length: 67}, (_, i) => mk(i));
+    // 45 дней — у чтения
+    const d45 = Array.from({length: 45}, (_, i) => mk(i));
+    // 30 дней — у медитации
+    const d30 = Array.from({length: 30}, (_, i) => mk(i));
+    // 14 дней — у сна
+    const d14 = Array.from({length: 14}, (_, i) => mk(i));
+    // 8 дней — у прогулки
+    const d8 = Array.from({length: 8}, (_, i) => mk(i));
+    // Без сладкого — пропуски (streak=0)
+    const dSweets = [mk(2), mk(3), mk(5), mk(7), mk(10)];
+    return {
+      user: { tg_id: 999999, name: 'Вероника', best_streak: 100, total_checks: 420, palette: 'forest', reminder_time: '08:00' },
+      habits: [
+        { id: 'h1', name: 'Вода 8 стаканов', emoji: '💧', color: '#5fb357', streak: 100, best: 100, doneDays: d100, totalChecks: 100, percent30: 100 },
+        { id: 'h2', name: 'Утренняя пробежка', emoji: '🏃', color: '#5fb357', streak: 67, best: 67, doneDays: d67, totalChecks: 67, percent30: 100 },
+        { id: 'h3', name: 'Чтение 30 мин', emoji: '📖', color: '#5fb357', streak: 45, best: 45, doneDays: d45, totalChecks: 45, percent30: 100 },
+        { id: 'h4', name: 'Медитация', emoji: '🧘', color: '#5fb357', streak: 30, best: 30, doneDays: d30, totalChecks: 30, percent30: 100 },
+        { id: 'h5', name: 'Сон до 23:00', emoji: '😴', color: '#5fb357', streak: 14, best: 22, doneDays: d14, totalChecks: 14, percent30: 47 },
+        { id: 'h6', name: 'Прогулка', emoji: '🚶', color: '#5fb357', streak: 8, best: 14, doneDays: d8, totalChecks: 8, percent30: 27 },
+        { id: 'h7', name: 'Без сладкого', emoji: '🍎', color: '#5fb357', streak: 0, best: 5, doneDays: dSweets, totalChecks: 5, percent30: 17 },
+      ],
+      challenges: [
+        { id: 'c1', title: '75 дней силы', emoji: '💪', description: 'Спорт каждые 2 дня', days: 75, color: '#38b000', completed: 0, checkDays: 60 },
+        { id: 'c2', title: '30 дней тишины', emoji: '🧘', description: 'Медитация', days: 30, color: '#c060a1', completed: 1, checkDays: 30 },
+        { id: 'c3', title: '100 дней шагов', emoji: '🚶', description: '10 000 шагов', days: 100, color: '#2cb1bc', completed: 0, checkDays: 25 },
+      ],
+      achievements: [
+        { code: 'first_check' }, { code: 'streak_3' }, { code: 'streak_7' }, { code: 'streak_14' },
+        { code: 'streak_30' }, { code: 'streak_100' },
+        { code: 'level_5' }, { code: 'level_10' }, { code: 'level_25' },
+        { code: 'early_bird' }, { code: 'night_owl' },
+        { code: 'goal_setter' },
+      ],
+    };
+  }
+
+  async function refreshData() {
+    if (!state.tg_id) return;
+    // Сначала пробуем взять данные из URL
+    const params = new URLSearchParams(location.search);
+    const dataRaw = params.get('data');
+    if (dataRaw && (!state.user || !state.user.total_checks)) {
+      try {
+        const data = JSON.parse(decodeURIComponent(dataRaw));
+        applyData(data);
+        return true;
+      } catch (e) {}
+    }
+    // Потом API (если есть)
+    try {
+      const hosts = [
+        `https://habit-tracker-bot-v51n.onrender.com`,
+        `http://localhost:18765`,
+        `https://${location.hostname}`,
+        `http://localhost:8765`,
+      ];
+      for (const h of hosts) {
+        try {
+          const r = await fetch(`${h}/api/webapp-data?tg_id=${state.tg_id}&_t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache' }
+          });
+          if (r.ok) {
+            const data = await r.json();
+            applyData(data);
+            console.log('Data refreshed from', h);
+            return true;
+          }
+        } catch (e) {}
+      }
+    } catch (e) { console.error('refreshData:', e); }
+    return false;
+    return false;
+  }
+
+  function applyData(data) {
+    if (data.user) state.user = { ...state.user, ...data.user };
+    if (data.habits) state.habits = data.habits;
+    if (data.challengeCatalog) state.challengeCatalog = data.challengeCatalog;
+    if (data.challenges) state.myChallenges = data.challenges;
+    if (data.achievements) state.achievements = data.achievements;
+    if (state.user?.palette) {
+      state.palette = state.user.palette;
+      document.documentElement.setAttribute('data-palette', state.palette);
+    }
+    state.loaded = true;
+    recalcHabitStats();
+    // Перерисуем текущую вкладку
+    const active = document.querySelector('.n-btn.active');
+    if (active) {
+      const tab = active.dataset.tab;
+      if (tab === 'home') renderHome();
+      else if (tab === 'stats') renderStats();
+      else if (tab === 'achievement') renderAchievement();
+      else if (tab === 'challenge') renderChallenge();
+    }
+  }
+
+  function startAutoRefresh() {
+    if (state.refreshTimer) clearInterval(state.refreshTimer);
+    // === ИДЕАЛЬНАЯ СИНХРОНИЗАЦИЯ ===
+    // 1. Polling каждые 1 сек — мгновенная синхронизация
+    // 2. ETag — если данные не изменились, не парсим JSON заново
+    // 3. Умный diff — перерисовываем только при изменении
+    state.refreshTimer = setInterval(async () => {
+      if (state.tg_id && !document.hidden) {
+        await refreshDataSmart();
+      }
+    }, 1000);
+  }
+
+  // === ETag для минимизации трафика ===
+  let lastETag = null;
+  let lastDataHash = null;
+
+  async function refreshDataSmart() {
+    if (!state.tg_id) return false;
+    const url = `https://habit-tracker-bot-v51n.onrender.com/api/webapp-data?tg_id=${state.tg_id}&_t=${Date.now()}`;
+    try {
+      const headers = { 'Cache-Control': 'no-cache' };
+      if (lastETag) headers['If-None-Match'] = lastETag;
+      const r = await fetch(url, { cache: 'no-store', headers });
+      // 304 Not Modified — данные те же, ничего не делаем
+      if (r.status === 304) return true;
+      if (!r.ok) return false;
+      // Сохраняем ETag
+      const etag = r.headers.get('etag');
+      if (etag) lastETag = etag;
+      const data = await r.json();
+      // Считаем хеш данных (имя + кол-во привычек + чек总数)
+      const dataHash = (data.user?.name || '') + '|' +
+                       (data.habits?.length || 0) + '|' +
+                       (data.stats?.totalChecks || 0) + '|' +
+                       (data.habits || []).map(h => (h.streak || 0) + (h.doneDays?.length || 0)).join(',');
+      // Если хеш не изменился — не перерисовываем
+      if (dataHash === lastDataHash) return true;
+      lastDataHash = dataHash;
+      // Применяем и перерисовываем
+      applyData(data);
+      const active = document.querySelector('.n-btn.active');
+      if (active) {
+        const tab = active.dataset.tab;
+        if (tab === 'home') renderHome();
+        else if (tab === 'stats') renderStats();
+        else if (tab === 'achievement') renderAchievement();
+        else if (tab === 'challenge') renderChallenge();
+      }
+      return true;
+    } catch (e) {
+      console.warn('refreshDataSmart:', e.message);
+      return false;
+    }
+  }
+
+  // Visibility API — обновляем при возвращении на таб
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && state.tg_id) {
+      // Сбрасываем ETag чтобы получить свежие данные
+      lastETag = null;
+      lastDataHash = null;
+      refreshDataSmart();
+    }
+  });
+  // Также refresh когда окно получает фокус
+  window.addEventListener('focus', () => {
+    if (state.tg_id) {
+      lastETag = null;
+      lastDataHash = null;
+      refreshDataSmart();
+    }
+  });
+  // Telegram WebApp events
+  if (window.Telegram?.WebApp) {
+    try {
+      window.Telegram.WebApp.onEvent('viewportChanged', () => {
+        if (state.tg_id) refreshDataSmart();
+      });
+      window.Telegram.WebApp.onEvent('contentSafeAreaChanged', () => {
+        if (state.tg_id) refreshDataSmart();
+      });
+    } catch (e) {}
+  }
+
+  // Pull-to-refresh для мобильных
+  let pullStartY = 0;
+  let pulling = false;
+  function setupPullToRefresh() {
+    document.addEventListener('touchstart', (e) => {
+      if (window.scrollY === 0) {
+        pullStartY = e.touches[0].clientY;
+        pulling = true;
+      }
+    }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!pulling) return;
+      const dy = e.touches[0].clientY - pullStartY;
+      if (dy > 80 && window.scrollY === 0) {
+        pulling = false;
+        toast('обновляю...');
+        refreshData();
+      }
+    }, { passive: true });
+    document.addEventListener('touchend', () => { pulling = false; }, { passive: true });
+  }
+
+  // ===== Init =====
+  async function init() {
+    if (!loadFromURL()) {
+      document.getElementById('content').innerHTML = '<div class="empty"><span class="em">○</span><div class="txt">открой из бота</div></div>';
+      return;
+    }
+    setupPullToRefresh();
+    // Сначала используем встроенный каталог
+    state.challengeCatalog = CHALLENGE_CATALOG;
+    if (state.demo) {
+      // Демо-режим: показываем прокачанный аккаунт
+      const data = getDemoData();
+      applyData(data);
+      renderHome();
+    } else {
+      // Сначала рисуем пустой home (мгновенный отклик)
+      renderHome();
+      // Потом грузим реальные данные с сервера (SMART — с ETag)
+      const ok = await refreshDataSmart();
+      if (ok) {
+        console.log('✅ API loaded, habits:', state.habits.length, 'name:', state.user?.name);
+        renderHome();
+      } else {
+        console.warn('⚠️ API failed, using fallback');
+        if (!state.user) {
+          state.user = { tg_id: state.tg_id, name: 'Друг', best_streak: 0, total_checks: 0, palette: state.palette || 'forest', reminder_time: '08:00' };
+        }
+        renderHome();
+      }
+    }
+    document.documentElement.setAttribute('data-palette', state.palette);
+    if (!state.demo) startAutoRefresh();
+  }
+  init();
+})();
+</script>
+</body>
+</html>

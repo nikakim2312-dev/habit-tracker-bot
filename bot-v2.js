@@ -261,6 +261,29 @@ const todayKey = () => {
 };
 const uid = () => randomBytes(6).toString('hex');
 
+// === Безопасное добавление привычки с дедупликацией ===
+// Возвращает { ok, id, deduped } где deduped=true если уже существует
+function addHabitSafe(tgId, name, emoji = '✨', color = '#5fb357') {
+  // Нормализуем имя для сравнения
+  const normalizedName = String(name || '').trim().slice(0, 60);
+  if (!normalizedName) return { ok: false, error: 'empty name' };
+  // Ищем существующую привычку (case-insensitive)
+  const lowerName = normalizedName.toLowerCase();
+  for (const h of Object.values(db.habits)) {
+    if (h.owner_id === tgId && h.name.toLowerCase() === lowerName) {
+      return { ok: true, id: h.id, deduped: true };
+    }
+  }
+  // Лимит 30 привычек
+  const userHabits = getHabits(tgId);
+  if (userHabits.length >= 30) {
+    return { ok: false, error: 'limit 30' };
+  }
+  const id = uid();
+  db.habits[id] = { id, owner_id: tgId, name: normalizedName, emoji, color, streak: 0, best: 0, created_at: Date.now() };
+  return { ok: true, id, deduped: false };
+}
+
 // ---------- Push Library (text only) ----------
 const PUSH = {
   morning: [
@@ -684,6 +707,7 @@ if (process.env.NODE_ENV === 'test') {
   global.__testApi = {
     getObState, setObState, clearObState, onboardState,
     db, getUser, getHabits, getHabit, saveDB, loadDB, buildOnboardKeyboard,
+    addHabitSafe,
   };
 }
 
@@ -840,9 +864,16 @@ bot.command('add', async (ctx) => {
     name = name.replace(emojiMatch[0], '').trim();
   }
 
-  const id = uid();
-  db.habits[id] = { id, owner_id: ctx.from.id, name: name.slice(0, 60), emoji, color: '#ff8906', streak: 0, best: 0, created_at: Date.now() };
+  // === Dedup через addHabitSafe ===
+  const result = addHabitSafe(ctx.from.id, name, emoji, '#ff8906');
+  if (!result.ok) {
+    if (result.error === 'limit 30') return safeReply(ctx, 'Лимит 30 привычек. Удали старые через /delete');
+    if (result.error === 'empty name') return safeReply(ctx, 'Формат: /add Название\nНапример: /add Пить воду');
+  }
   saveDB();
+  if (result.deduped) {
+    return safeReply(ctx, `${emoji} «${name}» уже есть в твоём списке ✓`);
+  }
   return safeReply(ctx, `Привычка ${emoji} «${name}» добавлена ✓\n\nОткрой в трекере или нажми /today`);
 });
 
@@ -1078,24 +1109,12 @@ bot.on('message:text', async (ctx) => {
   if (st && st.step === 'enter_name') {
     const name = text.trim().slice(0, 40) || 'друг';
     u.name = name;
-    // Привычки уже созданы в ob_rem. Если нет — добавим дефолты.
-    // Защита от дублирования: проверяем имя каждой привычки
+    // Привычки уже созданы в ob_rem. Если нет — добавим дефолты через addHabitSafe (dedup)
     if (getHabits(tgId).length === 0) {
       const defaultHabits = ['water', 'walk', 'sleep'];
       for (const h of defaultHabits) {
         const info = HABIT_NAMES[h] || ['✨', h];
-        const id = uid();
-        db.habits[id] = { id, owner_id: tgId, name: info[1], emoji: info[0], color: '#5fb357', streak: 0, best: 0, created_at: Date.now() };
-      }
-    } else {
-      // Защита: если уже есть привычки с дефолтными именами — оставляем, не дублируем
-      const existingNames = new Set(getHabits(tgId).map(h => h.name));
-      const defaultHabits = ['water', 'walk', 'sleep'];
-      for (const h of defaultHabits) {
-        const info = HABIT_NAMES[h] || ['✨', h];
-        if (existingNames.has(info[1])) continue;
-        const id = uid();
-        db.habits[id] = { id, owner_id: tgId, name: info[1], emoji: info[0], color: '#5fb357', streak: 0, best: 0, created_at: Date.now() };
+        addHabitSafe(tgId, info[1], info[0], '#5fb357');
       }
     }
     u.onboard_step = 100;
@@ -1104,7 +1123,7 @@ bot.on('message:text', async (ctx) => {
     const habitCount = getHabits(tgId).length;
     return safeReply(ctx,
       `Готово, ${name}! 🎉\n\n` +
-      `Создал ${habitCount} ${habitCount === 1 ? 'привычку' : (habitCount < 5 ? 'привычки' : 'привычек')}.\n\n` +
+      `У тебя ${habitCount} ${habitCount === 1 ? 'привычка' : (habitCount < 5 ? 'привычки' : 'привычек')}.\n\n` +
       `Напиши /today или открой приложение.`
     );
   }
@@ -1275,17 +1294,13 @@ bot.on('callback_query:data', async (ctx) => {
     }
     // Сохранить выбранные привычки (если есть picked)
     if (data === 'ob_done' && st.picked && st.picked.size > 0) {
-      // Защита от дублирования: проверяем есть ли уже такие привычки у юзера
-      const existing = getHabits(tgId).map(h => h.name);
+      // Используем addHabitSafe — дедупликация по имени (case-insensitive)
       for (const letter of st.picked) {
         const habitKey = ONBOARD[0].options[letter];
         if (!habitKey) continue;
         const [emoji, name] = HABIT_NAMES[habitKey];
         if (!emoji || !name) continue;
-        // Если уже есть — пропускаем (защита от дублей при повторном ob_done)
-        if (existing.includes(name)) continue;
-        const id = uid();
-        db.habits[id] = { id, owner_id: tgId, name, emoji, color: '#5fb357', streak: 0, best: 0, created_at: Date.now() };
+        addHabitSafe(tgId, name, emoji, '#5fb357');
       }
     }
     // Переход к следующему шагу
@@ -1541,9 +1556,8 @@ bot.on('message:web_app_data', async (ctx) => {
     return;
   }
   if (p.action === 'add_habit' && p.name) {
-    if (getHabits(tgId).length >= 30) return;
-    const id = uid();
-    db.habits[id] = { id, owner_id: tgId, name: String(p.name).slice(0, 60), emoji: p.emoji || '✨', color: p.color || '#ff8906', streak: 0, best: 0, created_at: Date.now() };
+    // Dedup через addHabitSafe
+    addHabitSafe(tgId, String(p.name), p.emoji || '✨', p.color || '#ff8906');
     saveDB();
     return;
   }
@@ -1886,13 +1900,16 @@ run();
           case 'add_habit': {
             const name = String(action.name || '').slice(0, 60).trim();
             if (!name) throw new Error('empty name');
-            if (getHabits(tgId).length >= 30) throw new Error('limit 30');
-            const id = uid();
             const emoji = String(action.emoji || '✨').slice(0, 4);
-            db.habits[id] = { id, owner_id: tgId, name, emoji, color: '#5fb357', streak: 0, best: 0, created_at: Date.now() };
+            // Dedup через addHabitSafe
+            const result = addHabitSafe(tgId, name, emoji, '#5fb357');
+            if (!result.ok) {
+              if (result.error === 'limit 30') throw new Error('limit 30');
+              throw new Error(result.error || 'add failed');
+            }
             saveDB();
             res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
-            res.end(JSON.stringify({ ok: true, id }));
+            res.end(JSON.stringify({ ok: true, id: result.id, deduped: result.deduped }));
             return;
           }
           case 'delete_habit': {

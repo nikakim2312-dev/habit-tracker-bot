@@ -16,5 +16,6 @@ jobs:
           node-version: '22'
       - run: npm install --omit=dev
       - run: node --check bot-v2.js
-      - run: cp bot-v2.js test-bot.js && DATA_FILE=test-data.json BOT_TOKEN=TEST LOG_LEVEL=critical NODE_ENV=test node test-onboard.cjs
-      - run: rm -f test-data.json test-bot.js
+      - run: cp bot-v2.js test-bot.js && DATA_FILE=test-onboard.json BOT_TOKEN=TEST LOG_LEVEL=critical NODE_ENV=test GIST_ID= GIST_TOKEN= node test-onboard.cjs
+      - run: DATA_FILE=test-dedup.json BOT_TOKEN=TEST LOG_LEVEL=critical NODE_ENV=test GIST_ID= GIST_TOKEN= node test-dedup.cjs
+      - run: rm -f test-onboard.json test-dedup.json test-bot.js

@@ -1982,6 +1982,51 @@ run();
             res.end(JSON.stringify({ ok: true }));
             return;
           }
+          case 'start_challenge': {
+            // Найти каталог челленджа
+            const cat = CHALLENGES.find(c => c.id === action.challenge_id);
+            if (!cat) throw new Error('challenge not found');
+            const tgKey = String(tgId);
+            // Проверить — может уже есть активный
+            const existing = Object.values(db.challenges || {}).find(c =>
+              String(c.owner_id) === tgKey && c.title === cat.title && !c.completed
+            );
+            if (existing) {
+              res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+              res.end(JSON.stringify({ ok: true, id: existing.id, deduped: true }));
+              return;
+            }
+            // Создать челлендж
+            const chId = uid();
+            db.challenges[chId] = {
+              id: chId, owner_id: tgId, catalog_id: cat.id,
+              title: cat.title, emoji: cat.emoji, desc: cat.desc || cat.description,
+              days: cat.days, color: cat.color, checkDays: 0, completed: 0,
+              started_at: Date.now(),
+            };
+            // Создать привычки из челленджа (если есть) — addHabitSafe с dedup
+            if (cat.habits && cat.habits.length) {
+              for (const h of cat.habits) {
+                addHabitSafe(tgId, h.name, h.emoji, cat.color);
+              }
+            } else if (cat.habitName) {
+              addHabitSafe(tgId, cat.habitName, cat.habitEmoji, cat.color);
+            }
+            saveDB();
+            res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+            res.end(JSON.stringify({ ok: true, id: chId }));
+            return;
+          }
+          case 'check_challenge': {
+            const ch = db.challenges[action.challenge_id];
+            if (!ch || String(ch.owner_id) !== String(tgId)) throw new Error('challenge not found');
+            ch.checkDays = (ch.checkDays || 0) + 1;
+            if (ch.checkDays >= ch.days) ch.completed = 1;
+            saveDB();
+            res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+            res.end(JSON.stringify({ ok: true, checkDays: ch.checkDays, completed: ch.completed }));
+            return;
+          }
           default:
             throw new Error('unknown action');
         }

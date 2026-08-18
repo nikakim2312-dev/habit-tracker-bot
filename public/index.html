@@ -831,6 +831,12 @@
     refreshTimer: null,
   };
 
+  // === ETag + hash для оптимизации polling ===
+  // Объявляем ДО sendAction, чтобы избежать TDZ
+  let lastETag = null;
+  let lastDataHash = null;
+  let refreshInFlight = false; // Защита от параллельных refresh
+
   const CHALLENGE_CATALOG = [
     { id: 'water21', title: '21 день воды', emoji: '💧', shortDesc: 'Стакан воды утром и вечером', description: '21 день — привычка формируется. Стакан воды сразу после пробуждения и стакан перед сном.', days: 21, color: '#4a8fe7', habitName: 'Вода утро/вечер', habitEmoji: '💧' },
     { id: 'walk21', title: '21 день прогулок', emoji: '🚶', shortDesc: '30 минут на воздухе', description: '21 день — формируем привычку. 30 минут прогулки на свежем воздухе.', days: 21, color: '#52b788', habitName: 'Прогулка 30 мин', habitEmoji: '🚶' },
@@ -961,8 +967,16 @@
   }
 
   // ===== Helpers =====
+  // Локальная дата (НЕ UTC!) — иначе отметки ломаются в не-UTC часовых поясах
+  function localToday() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
   function isHabitDoneToday(h) {
-    const today = new Date().toISOString().slice(0,10);
+    const today = localToday();
     if (h.doneDays && h.doneDays.length) return h.doneDays.includes(today);
     if (h.last30 && h.last30.length) {
       const last = h.last30[h.last30.length - 1];
@@ -971,7 +985,7 @@
     return false;
   }
   function setHabitDoneToday(h, done) {
-    const today = new Date().toISOString().slice(0,10);
+    const today = localToday();
     if (!h.doneDays) h.doneDays = [];
     const idx = h.doneDays.indexOf(today);
     if (done && idx === -1) h.doneDays.push(today);
@@ -991,7 +1005,7 @@
     const name = state.user?.name || 'Друг';
     document.getElementById('name').textContent = name;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     const doneToday = state.habits.filter(h => isHabitDoneToday(h)).length;
     const total = state.habits.length;
     const best = state.user?.best_streak || 0;
@@ -1068,9 +1082,8 @@
         h.streak = !wasDone ? (h.streak || 0) + 1 : Math.max(0, (h.streak || 0) - 1);
         h.totalChecks = (h.totalChecks || 0) + (!wasDone ? 1 : -1);
         renderHome();
-        sendAction('toggle_habit', { habit_id: h.id });
-        // Подтянуть свежие данные с сервера
-        setTimeout(refreshData, 800);
+        // Используем 'check' (action который знает бот) с date
+        sendAction('check', { habit_id: h.id, date: localToday() });
       };
     });
     const mini = document.getElementById('openFullApp');
@@ -1079,7 +1092,7 @@
 
   function renderAllHabits() {
     const c = document.getElementById('content');
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localToday();
     let html = `<div class="page-title">все привычки</div>`;
     state.habits.forEach(h => {
       const isDone = isHabitDoneToday(h);
@@ -1101,6 +1114,7 @@
     document.querySelectorAll('.habit-mini').forEach(el => {
       const delBtn = el.querySelector('.del');
       if (delBtn) {
+        let confirmTimer = null;
         delBtn.onclick = (e) => {
           e.stopPropagation();
           const habit = state.habits.find(x => x.id === el.dataset.id);
@@ -1111,7 +1125,8 @@
             delBtn.style.color = 'var(--primary)';
             delBtn.style.opacity = '1';
             toast('нажми ещё раз для удаления');
-            setTimeout(() => {
+            // Сохраняем таймер чтобы очистить при unmount
+            confirmTimer = setTimeout(() => {
               if (delBtn._confirm) {
                 delBtn._confirm = false;
                 delBtn.textContent = '×';
@@ -1121,12 +1136,12 @@
             }, 3000);
             return;
           }
+          if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null; }
           const id = el.dataset.id;
           state.habits = state.habits.filter(x => x.id !== id);
           sendAction('delete_habit', { habit_id: id });
           renderAllHabits();
           toast('удалено');
-          setTimeout(refreshData, 500);
         };
         return;
       }
@@ -1138,7 +1153,8 @@
         setHabitDoneToday(h, !wasDone);
         h.streak = !wasDone ? (h.streak || 0) + 1 : Math.max(0, (h.streak || 0) - 1);
         renderAllHabits();
-        sendAction('toggle_habit', { habit_id: h.id });
+        // Используем 'check' (action который знает бот) с date
+        sendAction('check', { habit_id: h.id, date: localToday() });
       };
     });
     const back = document.getElementById('backHome');
@@ -1146,32 +1162,33 @@
   }
 
   // ===== Стат + Календарь + Диаграмма =====
-  // Пересчёт статистики по текущим данным
+  // Пересчёт статистики по текущим данным (ЛОКАЛЬНОЕ время!)
   function recalcHabitStats() {
     const todayD = new Date();
-    const todayKey = `${todayD.getFullYear()}-${String(todayD.getMonth()+1).padStart(2,'0')}-${String(todayD.getDate()).padStart(2,'0')}`;
+    const todayKey = localToday();
+    function dayKey(offset) {
+      const d = new Date(todayD);
+      d.setDate(d.getDate() - offset);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
     for (const h of state.habits) {
       const done = h.doneDays || [];
       h.totalChecks = done.length;
       // Считаем процент за последние 30 дней
       let recent = 0;
       for (let i = 0; i < 30; i++) {
-        const d = new Date(todayD);
-        d.setDate(d.getDate() - i);
-        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        if (done.includes(k)) recent++;
+        if (done.includes(dayKey(i))) recent++;
       }
       h.percent30 = Math.round(recent / 30 * 100);
       h.todayDone = done.includes(todayKey);
-      // Streak
+      // Streak — считаем назад от сегодня
       let streak = 0;
       for (let i = 0; i < 365; i++) {
-        const d = new Date(todayD);
-        d.setDate(d.getDate() - i);
-        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        if (done.includes(k)) streak++; else break;
+        if (done.includes(dayKey(i))) streak++;
+        else if (i > 0) break; // Первый пропуск (не сегодня) ломает streak
       }
       h.streak = streak;
+      if (streak > (h.best || 0)) h.best = streak;
     }
     // Обновляем user.total_checks
     if (state.user) {
@@ -1724,12 +1741,13 @@
     }, 1000);
   }
 
-  // === ETag для минимизации трафика ===
-  let lastETag = null;
-  let lastDataHash = null;
+  // lastETag/lastDataHash/refreshInFlight уже объявлены выше (state)
 
   async function refreshDataSmart() {
     if (!state.tg_id) return false;
+    // Защита от race condition — если refresh уже идёт, пропускаем
+    if (refreshInFlight) return false;
+    refreshInFlight = true;
     const url = `https://habit-tracker-bot-v51n.onrender.com/api/webapp-data?tg_id=${state.tg_id}&_t=${Date.now()}`;
     try {
       const headers = { 'Cache-Control': 'no-cache' };
@@ -1764,6 +1782,8 @@
     } catch (e) {
       console.warn('refreshDataSmart:', e.message);
       return false;
+    } finally {
+      refreshInFlight = false;
     }
   }
 

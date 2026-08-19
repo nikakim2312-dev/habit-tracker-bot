@@ -1199,23 +1199,22 @@ bot.on('message:text', async (ctx) => {
   if (st && st.step === 'enter_name') {
     const name = text.trim().slice(0, 40) || 'друг';
     u.name = name;
-    // Привычки уже созданы в ob_rem. Если нет — добавим дефолты через addHabitSafe (dedup)
-    if (getHabits(tgId).length === 0) {
-      const defaultHabits = ['water', 'walk', 'sleep'];
-      for (const h of defaultHabits) {
-        const info = HABIT_NAMES[h] || ['✨', h];
-        addHabitSafe(tgId, info[1], info[0], '#5fb357');
-      }
-    }
+    // ВАЖНО: НЕ создаём дефолтные привычки автоматически
+    // Если юзер ничего не выбрал в ob_done — пусть начнёт с пустого списка
+    // Он может добавить через /add или в WebApp
+    // (Раньше создавались water/walk/sleep — это неожиданно для юзера)
     u.onboard_step = 100;
     clearObState(tgId);
     saveDB();
     const habitCount = getHabits(tgId).length;
-    return safeReply(ctx,
-      `Готово, ${name}! 🎉\n\n` +
-      `У тебя ${habitCount} ${habitCount === 1 ? 'привычка' : (habitCount < 5 ? 'привычки' : 'привычек')}.\n\n` +
-      `Напиши /today или открой приложение.`
-    );
+    let msg = `Готово, ${name}! 🎉\n\n`;
+    if (habitCount > 0) {
+      msg += `У тебя ${habitCount} ${habitCount === 1 ? 'привычка' : (habitCount < 5 ? 'привычки' : 'привычек')}.\n\n`;
+    } else {
+      msg += `Ты не выбрал(а) привычки — это ок! Добавь через /add Название или в Mini App.\n\n`;
+    }
+    msg += `Напиши /today или открой приложение.`;
+    return safeReply(ctx, msg);
   }
 
   // Если юзер на любом шаге онбординга, но пишет текст — подскажем что делать

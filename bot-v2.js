@@ -799,16 +799,21 @@ function giveReward(tgId, text) {
   // Заглушка — можно расширить для будущих фишек
   logger.info(`[REWARD] tg=${tgId}: ${text}`);
 }
-async function sendPush(tgId, push, cta = 'menu:today', extra = '') {
+async function sendPush(tgId, push, cta = 'menu:today', extra = '', userName = 'друг') {
   // Защита от undefined tgId
   if (!tgId || !push || !push.text) {
     logger.warn('sendPush: missing tgId or push');
     return;
   }
+  // push.text — это ФУНКЦИЯ (n => `...`) — нужно вызвать её с именем
+  // Иначе Telegram получит "function..." как текст
+  const messageText = typeof push.text === 'function'
+    ? push.text(userName || 'друг')
+    : (push.text + (extra ? '\n\n' + extra : ''));
   try {
     await bot.api.sendMessage(
       tgId,
-      push.text + (extra ? '\n\n' + extra : ''),
+      messageText,
       { reply_markup: { inline_keyboard: [[{ text: push.btn || 'OK', callback_data: cta }]] } }
     );
   } catch (e) { logger.error('sendPush failed', e); }
@@ -1733,7 +1738,7 @@ setInterval(async () => {
         else if (u.reminder_time === '13:00') pool = PUSH.day;
         else if (u.reminder_time === '08:00') pool = PUSH.morning;
         else pool = PUSH.bold;
-        await sendPush(tgId, pickPush(pool, u.name));
+        await sendPush(tgId, pickPush(pool, u.name), 'menu:today', '', u.name);
         markSent(tgId, key);
       } catch (e) {
         logger.error(`Scheduler error for user ${tgId}`, e.message);
@@ -1756,7 +1761,7 @@ setInterval(async () => {
           const key = `comeback:${Math.floor(nowSec / 3600)}`;
           if (wasSent(tgId, key)) continue;
           const pool = nowSec - last > 5 * 86400 ? PUSH.long_away : PUSH.comeback;
-          await sendPush(Number(tgId), pickPush(pool, u.name));
+          await sendPush(Number(tgId), pickPush(pool, u.name), 'menu:today', '', u.name);
           markSent(tgId, key);
         } catch (e) {
           logger.error(`Comeback scheduler error for user ${tgId}`, e.message);

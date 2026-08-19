@@ -18,4 +18,5 @@ jobs:
       - run: node --check bot-v2.js
       - run: cp bot-v2.js test-bot.js && DATA_FILE=test-onboard.json BOT_TOKEN=TEST LOG_LEVEL=critical NODE_ENV=test GIST_ID= GIST_TOKEN= node test-onboard.cjs
       - run: DATA_FILE=test-dedup.json BOT_TOKEN=TEST LOG_LEVEL=critical NODE_ENV=test GIST_ID= GIST_TOKEN= node test-dedup.cjs
-      - run: rm -f test-onboard.json test-dedup.json test-bot.js
+      - run: DATA_FILE=test-push.json BOT_TOKEN=TEST LOG_LEVEL=critical node test-push.cjs
+      - run: rm -f test-onboard.json test-dedup.json test-push.json test-bot.js

@@ -1341,8 +1341,8 @@ async function showSettingsInline(ctx) {
 
 function buildWebAppUrl(tgId) {
   // Короткий URL — Telegram имеет лимит ~512 символов на web_app.url
-  // v=40.9 — cache buster: при обновлении версии WebApp Telegram загрузит свежий
-  return `${WEBAPP_URL}?tg_id=${tgId}&v=40.9`;
+  // v=40.21 — cache buster: при обновлении версии WebApp Telegram загрузит свежий
+  return `${WEBAPP_URL}?tg_id=${tgId}&v=40.21`;
 }
 
 bot.on('callback_query:data', async (ctx) => {

@@ -1390,10 +1390,13 @@
     `;
     all.forEach(a => {
       const have = unlocked.has(a.code);
+      // ВАЖНО: a.name через escapeHtml (XSS защита)
+      const safeName = escapeHtml(a.name || '');
+      const safeIcon = escapeHtml(a.icon || '·');
       html += `
         <div class="ach-tile ${have ? 'unlocked' : 'locked'}">
-          <div class="ach-icon">${have ? a.icon : '·'}</div>
-          <div class="ach-name">${have ? a.name : '???'}</div>
+          <div class="ach-icon">${have ? safeIcon : '·'}</div>
+          <div class="ach-name">${have ? safeName : '???'}</div>
         </div>
       `;
     });

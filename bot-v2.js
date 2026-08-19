@@ -262,6 +262,11 @@ function saveDB() {
 
 // Helpers
 function getUser(tgId) {
+  // Защита от 0/undefined
+  if (!tgId) {
+    logger.warn('getUser called with empty tgId');
+    return null;
+  }
   // ВАЖНО: ключ всегда строка для консистентности
   const key = String(tgId);
   if (!db.users[key]) {
@@ -1744,7 +1749,7 @@ setInterval(async () => {
         logger.error(`Scheduler error for user ${tgId}`, e.message);
       }
     }
-    // 1 раз в день в 19:00 — comeback push
+    // 1 раз в день в 19:00 — comeback push ИЛИ praise если всё отмечено
     if (nowStr === '19:00') {
       for (const tgId of Object.keys(db.users)) {
         try {
@@ -1752,16 +1757,28 @@ setInterval(async () => {
           if (!u || u.onboard_step < 100) continue;
           if (isSilent(Number(tgId))) continue;
           const day = todayKey();
-          const habits = getHabits(Number(tgId));
+          const habits = getHabits(tgId);
+          if (habits.length === 0) continue;
           const done = habits.filter(h => isChecked(h.id, day)).length;
-          if (done === habits.length && habits.length > 0) continue;
+          const allDone = done === habits.length;
+          // 1) Похвала если ВСЁ отмечено — независимо от last_seen
+          if (allDone) {
+            const praiseKey = `praise:${day}`;
+            if (!wasSent(tgId, praiseKey)) {
+              const pool = PUSH.praise_today;
+              await sendPush(tgId, pickPush(pool, u.name), 'menu:today', '', u.name);
+              markSent(tgId, praiseKey);
+            }
+            continue; // Не слать comeback если всё сделано
+          }
+          // 2) Comeback если не заходил > 2 дней
           const last = u.last_seen_at || 0;
           const nowSec = Math.floor(Date.now() / 1000);
           if (nowSec - last < 2 * 86400) continue;
           const key = `comeback:${Math.floor(nowSec / 3600)}`;
           if (wasSent(tgId, key)) continue;
           const pool = nowSec - last > 5 * 86400 ? PUSH.long_away : PUSH.comeback;
-          await sendPush(Number(tgId), pickPush(pool, u.name), 'menu:today', '', u.name);
+          await sendPush(tgId, pickPush(pool, u.name), 'menu:today', '', u.name);
           markSent(tgId, key);
         } catch (e) {
           logger.error(`Comeback scheduler error for user ${tgId}`, e.message);

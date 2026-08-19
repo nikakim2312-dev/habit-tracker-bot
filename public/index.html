@@ -900,19 +900,16 @@
         body: JSON.stringify({ type, tg_id: state.tg_id, ...payload })
       });
       const data = await r.json();
-      // Сбросить ETag и хеш — данные изменились
-      lastETag = null;
+      // Сбросить хеш — данные изменились
       lastDataHash = null;
-      // Мгновенный refresh
-      await refreshDataSmart();
+      // Принудительный refresh (без 304)
+      await forceRefresh();
 
       // 2. Для ВАЖНЫХ действий — шлём событие в чат (через tg.sendData)
-      // Бот получит это как текстовое сообщение и сможет ответить
       if (tg?.sendData && !QUIET_ACTIONS.has(type)) {
         try {
           tg.sendData(JSON.stringify({ action: type, ...payload, _result: data }));
         } catch (e) {
-          // Если Mini App открыт НЕ из бота (например /diag) — sendData упадёт
           console.debug('sendData skipped:', e.message);
         }
       }
@@ -1515,7 +1512,7 @@
     // Сначала подтягиваем свежие данные (смарт с ETag)
     lastETag = null;
     lastDataHash = null;
-    await refreshDataSmart();
+    await forceRefresh();
     if (tab === 'home') renderHome();
     else if (tab === 'stats') renderStats();
     else if (tab === 'achievement') renderAchievement();
@@ -1809,45 +1806,36 @@
 
   function startAutoRefresh() {
     if (state.refreshTimer) clearInterval(state.refreshTimer);
-    // === ИДЕАЛЬНАЯ СИНХРОНИЗАЦИЯ ===
-    // 1. Polling каждые 1 сек — мгновенная синхронизация
-    // 2. ETag — если данные не изменились, не парсим JSON заново
-    // 3. Умный diff — перерисовываем только при изменении
+    // === ПРОСТАЯ И НАДЁЖНАЯ СИНХРОНИЗАЦИЯ ===
+    // Polling каждые 2 сек + force refresh после любой мутации
+    // Без ETag (304 может блокировать обновления)
     state.refreshTimer = setInterval(async () => {
       if (state.tg_id && !document.hidden) {
-        await refreshDataSmart();
+        await forceRefresh();
       }
-    }, 1000);
+    }, 2000);
   }
 
-  // lastETag/lastDataHash/refreshInFlight уже объявлены выше (state)
-
-  async function refreshDataSmart() {
+  // Простая версия: ВСЕГДА тянет свежие данные, без 304
+  async function forceRefresh() {
     if (!state.tg_id) return false;
-    // Защита от race condition — если refresh уже идёт, пропускаем
     if (refreshInFlight) return false;
     refreshInFlight = true;
     const url = `https://habit-tracker-bot-v51n.onrender.com/api/webapp-data?tg_id=${state.tg_id}&_t=${Date.now()}`;
     try {
-      const headers = { 'Cache-Control': 'no-cache' };
-      if (lastETag) headers['If-None-Match'] = lastETag;
-      const r = await fetch(url, { cache: 'no-store', headers });
-      // 304 Not Modified — данные те же, ничего не делаем
-      if (r.status === 304) return true;
+      const r = await fetch(url, { cache: 'no-store' });
       if (!r.ok) return false;
-      // Сохраняем ETag
-      const etag = r.headers.get('etag');
-      if (etag) lastETag = etag;
       const data = await r.json();
-      // Считаем хеш данных (имя + кол-во привычек + чек总数)
-      const dataHash = (data.user?.name || '') + '|' +
-                       (data.habits?.length || 0) + '|' +
-                       (data.stats?.totalChecks || 0) + '|' +
-                       (data.habits || []).map(h => (h.streak || 0) + (h.doneDays?.length || 0)).join(',');
-      // Если хеш не изменился — не перерисовываем
-      if (dataHash === lastDataHash) return true;
+      // Проверяем изменились ли данные
+      const dataHash = JSON.stringify({
+        n: data.user?.name || '',
+        h: (data.habits || []).length,
+        c: data.user?.total_checks || 0,
+        t: data.today || {},
+        habits: (data.habits || []).map(h => h.id + ':' + (h.streak || 0) + ':' + (h.percent30 || 0) + ':' + (h.doneDays?.length || 0))
+      });
+      if (dataHash === lastDataHash) return true; // ничего не изменилось
       lastDataHash = dataHash;
-      // Применяем и перерисовываем
       applyData(data);
       const active = document.querySelector('.n-btn.active');
       if (active) {
@@ -1859,38 +1847,39 @@
       }
       return true;
     } catch (e) {
-      console.warn('refreshDataSmart:', e.message);
+      console.warn('forceRefresh:', e.message);
       return false;
     } finally {
       refreshInFlight = false;
     }
   }
 
+  // lastETag/lastDataHash/refreshInFlight уже объявлены выше (state)
+  // forceRefresh уже определена выше (в startAutoRefresh)
+
   // Visibility API — обновляем при возвращении на таб
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && state.tg_id) {
-      // Сбрасываем ETag чтобы получить свежие данные
-      lastETag = null;
+      // Сбрасываем хеш чтобы получить свежие данные
       lastDataHash = null;
-      refreshDataSmart();
+      forceRefresh();
     }
   });
   // Также refresh когда окно получает фокус
   window.addEventListener('focus', () => {
     if (state.tg_id) {
-      lastETag = null;
       lastDataHash = null;
-      refreshDataSmart();
+      forceRefresh();
     }
   });
   // Telegram WebApp events
   if (window.Telegram?.WebApp) {
     try {
       window.Telegram.WebApp.onEvent('viewportChanged', () => {
-        if (state.tg_id) refreshDataSmart();
+        if (state.tg_id) forceRefresh();
       });
       window.Telegram.WebApp.onEvent('contentSafeAreaChanged', () => {
-        if (state.tg_id) refreshDataSmart();
+        if (state.tg_id) forceRefresh();
       });
     } catch (e) {}
   }
@@ -1914,7 +1903,7 @@
         // Сбрасываем ETag чтобы получить свежие данные
         lastETag = null;
         lastDataHash = null;
-        refreshDataSmart();
+        forceRefresh();
       }
     }, { passive: true });
     document.addEventListener('touchend', () => { pulling = false; }, { passive: true });
@@ -1938,7 +1927,7 @@
       // Сначала рисуем пустой home (мгновенный отклик)
       renderHome();
       // Потом грузим реальные данные с сервера (SMART — с ETag)
-      const ok = await refreshDataSmart();
+      const ok = await forceRefresh();
       if (ok) {
         console.log('✅ API loaded, habits:', state.habits.length, 'name:', state.user?.name);
         renderHome();

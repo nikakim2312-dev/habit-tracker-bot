@@ -934,6 +934,19 @@ bot.command('add', async (ctx) => {
   if (emojiMatch) {
     emoji = emojiMatch[1];
     name = name.replace(emojiMatch[0], '').trim();
+  } else {
+    // Подобрать emoji по ключевым словам в названии
+    const lower = name.toLowerCase();
+    if (/вод|пить|жидкост/.test(lower)) emoji = '💧';
+    else if (/спорт|бег|тренир|зал|фитнес/.test(lower)) emoji = '🏃';
+    else if (/книг|чтен|чита/.test(lower)) emoji = '📖';
+    else if (/медит|дыхан|тишин/.test(lower)) emoji = '🧘';
+    else if (/сон|спать/.test(lower)) emoji = '😴';
+    else if (/прогул|шаг/.test(lower)) emoji = '🚶';
+    else if (/телефон|экран|соцсет/.test(lower)) emoji = '📵';
+    else if (/учеб|учить|курс/.test(lower)) emoji = '🎓';
+    else if (/еда|питан|сахар|диет/.test(lower)) emoji = '🥗';
+    else if (/йог|растяжк/.test(lower)) emoji = '🧘‍♀️';
   }
 
   // === Dedup через addHabitSafe ===
@@ -1058,6 +1071,7 @@ bot.command('start', async (ctx) => {
 function buildOnboardKeyboard(tgId) {
   const st = getObState(tgId);
   const picked = st?.picked || new Set();
+  const customHabits = st?.custom || []; // Свои привычки из онбординга
   const habitButtons = [];
   // Фиксированный порядок букв для UI
   const habitLetters = ['А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ж', 'З'];
@@ -1071,8 +1085,17 @@ function buildOnboardKeyboard(tgId) {
     if (b && bName) row.push({ text: `${bMark}${b} ${bName}`, callback_data: `ob_pick:${b}` });
     habitButtons.push(row);
   }
+  // Показываем свои привычки
+  if (customHabits.length > 0) {
+    for (const ch of customHabits) {
+      habitButtons.push([{ text: `✅ ${ch.emoji} ${ch.name}`, callback_data: 'noop' }]);
+    }
+  }
   habitButtons.push([
-    { text: `✅ Готово (${picked.size})`, callback_data: 'ob_done' },
+    { text: `➕ Своя привычка`, callback_data: 'ob_custom' }
+  ]);
+  habitButtons.push([
+    { text: `✅ Готово (${picked.size + customHabits.length})`, callback_data: 'ob_done' },
     { text: '⏭ Пропустить', callback_data: 'ob_skip' }
   ]);
   return habitButtons;
@@ -1194,6 +1217,45 @@ bot.on('message:text', async (ctx) => {
   // === ОНБОРДИНГ v2 — упрощённый flow ===
   // Только ввод имени на финальном шаге (после выбора времени кнопкой)
   const st = getObState(tgId);
+
+  // === Шаг ввода своей привычки в онбординге ===
+  if (st && st.step === 'enter_custom_habit') {
+    const raw = text.trim().slice(0, 60);
+    if (!raw || raw.length < 2) {
+      return safeReply(ctx, 'Напиши название привычки (хотя бы 2 символа).\n\nИли /cancel для отмены.');
+    }
+    // Извлекаем emoji если первый символ — эмодзи
+    let emoji = '✨';
+    let name = raw;
+    const emojiMatch = raw.match(/^(\p{Extended_Pictographic})(?:\s+|$)/u);
+    if (emojiMatch) {
+      emoji = emojiMatch[1];
+      name = raw.replace(emojiMatch[0], '').trim();
+    }
+    if (!name) name = raw; // fallback
+    // Добавляем в custom список
+    const custom = st.custom || [];
+    custom.push({ name, emoji });
+    // Возвращаемся к pick_habits с обновленным списком
+    setObState(tgId, { step: 'pick_habits', custom });
+    // Обновляем клавиатуру
+    try {
+      await safeEditMarkup(ctx, { reply_markup: { inline_keyboard: buildOnboardKeyboard(tgId) } });
+    } catch (e) {}
+    return safeReply(ctx,
+      `✅ Добавлено: ${emoji} ${name}\n\n` +
+      `Можешь добавить ещё или нажми "✅ Готово".\n\n` +
+      `/cancel — отменить свою привычку`
+    );
+  }
+
+  // === Команда /cancel — отмена ввода своей привычки ===
+  if (st && st.step === 'enter_custom_habit' && text === '/cancel') {
+    setObState(tgId, { step: 'pick_habits' });
+    return safeReply(ctx, 'Отменено. Возвращаюсь к выбору.', {
+      reply_markup: { inline_keyboard: buildOnboardKeyboard(tgId) }
+    });
+  }
 
   // Если юзер сейчас на шаге ввода имени (после ob_rem)
   if (st && st.step === 'enter_name') {
@@ -1392,6 +1454,16 @@ bot.on('callback_query:data', async (ctx) => {
     }
     return safeAnswerCb(ctx, `Выбрано: ${st.picked.size}`);
   }
+  // === Кнопка "+ Своя привычка" в онбординге ===
+  if (data === 'ob_custom') {
+    const st = getObState(tgId);
+    if (!st || st.step !== 'pick_habits') {
+      return safeAnswerCb(ctx, '⚠️ Сначала /start');
+    }
+    setObState(tgId, { step: 'enter_custom_habit' });
+    await safeAnswerCb(ctx, '📝 Напиши название и эмодзи (опционально) одним сообщением.\n\nПримеры:\n— Пилатес\n— 🏋️ Спортзал\n— 🚶 Прогулка 30 мин\n— 📚 Книги 20 мин\n— 🍎 Без сахара');
+    return safeReply(ctx, '📝 Напиши свою привычку:');
+  }
   if (data === 'ob_done' || data === 'ob_skip') {
     const st = getObState(tgId);
     if (!st) {
@@ -1406,6 +1478,12 @@ bot.on('callback_query:data', async (ctx) => {
         const [emoji, name] = HABIT_NAMES[habitKey];
         if (!emoji || !name) continue;
         addHabitSafe(tgId, name, emoji, '#5fb357');
+      }
+    }
+    // Сохранить свои привычки (custom)
+    if (data === 'ob_done' && st.custom && st.custom.length > 0) {
+      for (const ch of st.custom) {
+        addHabitSafe(tgId, ch.name, ch.emoji || '✨', '#5fb357');
       }
     }
     // Переход к следующему шагу

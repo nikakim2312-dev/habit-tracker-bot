@@ -12,7 +12,7 @@ const path = require('path');
   process.env.NODE_ENV = 'test';
 
   // Динамически загружаем бот (он ESM)
-  await import('./test-bot.js');
+  await import('./bot-v2.js');
   // Достаём API через global
   const api = global.__testApi;
   if (!api) {
@@ -51,7 +51,7 @@ const path = require('path');
   // 4
   const kb = buildOnboardKeyboard(tgId);
   assert(Array.isArray(kb), '4.1 kb это массив');
-  assert(kb.length === 5, '4.2 5 рядов (4 привычки + 1 done)');
+  assert(kb.length === 6, '4.2 6 рядов (4 привычки + Своя + Готово/Пропустить)');
   const lastRow = kb[kb.length - 1];
   assert(lastRow[0].text.includes('✅ Готово'), '4.3 кнопка Готово');
   assert(lastRow[0].text.includes('(2)'), '4.4 счётчик (2)');
